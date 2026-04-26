@@ -1,68 +1,87 @@
-use core::fmt;
+use core::fmt::{Display, Formatter, Result};
+use std::error::Error;
 
 /// An enum representing all errors for Annihilative Keys.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AnnihilationError {
-    /// The annihilative pair is either only two keys or two antikeys.
+pub enum AnnihlErr {
+    /// Given bytes could not decompress to a valid elliptic curve point,
+    /// preventing the deserialisation of an annihilative key.
+    PointDecompress,
+
+    /// The annihilative pair's members are either both keys or both antikeys,
+    /// rendering the pair invalid.
     InvalidPair,
-    /// The stored curve point is invalid and could not be decompressed,
-    /// preventing recovery of the shared base point.
-    PointRecovery,
-    /// The comparison of two shared base curve points yielded a mismatch.
+
+    /// Proof-of-work constraints between the solutions of both annihilative
+    /// pair members do not match.
+    ConstraintMatch,
+
+    /// The hash of an annihilative pair's XOR does not satisfy the pair's
+    /// proof-of-work constraint.
+    UnsatConstraint,
+
+    /// The commitments of two solutions produce commitment collisions,
+    /// rendering their annihilative pair invalid.
+    CommitCollision,
+
+    /// Base elliptic curve points do not match between two members of an
+    /// annihilative pair.
     PointMismatch,
-    /// The constraints of two annihilative key solutions do not match.
-    ConstraintMismatch,
-    /// The proof of work constraint was not satisfied by the XOR hash.
-    UnsatisfiedConstraint,
+
+    /// Given keying material failed to authenticate a solution's body.
+    UnauthBody,
 }
 
-impl fmt::Display for AnnihilationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AnnihilationError::InvalidPair => {
-                write!(f, "annihilative pair has only keys or antikeys")
-            }
-            AnnihilationError::PointRecovery => {
-                write!(f, "unable to recover shared base curve point")
-            }
-            AnnihilationError::PointMismatch => {
-                write!(f, "recovered base curve points do not match")
-            }
-            AnnihilationError::ConstraintMismatch => {
-                write!(f, "key and antikey constraints do not match")
-            }
-            AnnihilationError::UnsatisfiedConstraint => {
-                write!(f, "XOR hash does not satisfy the constraint")
-            }
-        }
+impl Display for AnnihlErr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        f.write_str(match self {
+            Self::PointDecompress => "cannot decompress curve point",
+            Self::InvalidPair => "pair has only keys or antikeys",
+            Self::ConstraintMatch => "pair constraints do not match",
+            Self::UnsatConstraint => "proof-of-work constraint unsatisfied",
+            Self::CommitCollision => "commitments would produce collision",
+            Self::PointMismatch => "pair base curve point mismatch",
+            Self::UnauthBody => "unable to authenticate solution body",
+        })
     }
 }
 
+impl Error for AnnihlErr {}
+
 #[test]
-fn error_display() {
-    // Test Display trait for InvalidPair
+fn test_display() {
     assert_eq!(
-        AnnihilationError::InvalidPair.to_string(),
-        "annihilative pair has only keys or antikeys"
+        AnnihlErr::PointDecompress.to_string(),
+        "cannot decompress curve point"
     );
-    // Test Display trait for PointRecovery
+
     assert_eq!(
-        AnnihilationError::PointRecovery.to_string(),
-        "unable to recover shared base curve point"
+        AnnihlErr::InvalidPair.to_string(),
+        "pair has only keys or antikeys"
     );
-    // Test Display trait for PointMismatch
+
     assert_eq!(
-        AnnihilationError::PointMismatch.to_string(),
-        "recovered base curve points do not match"
+        AnnihlErr::ConstraintMatch.to_string(),
+        "pair constraints do not match"
     );
-    // Test Display trait for ConstraintMismatch
+
     assert_eq!(
-        AnnihilationError::ConstraintMismatch.to_string(),
-        "key and antikey constraints do not match"
+        AnnihlErr::UnsatConstraint.to_string(),
+        "proof-of-work constraint unsatisfied"
     );
-    // Test Display trait for UnsatisfiedConstraint
+
     assert_eq!(
-        AnnihilationError::UnsatisfiedConstraint.to_string(),
-        "XOR hash does not satisfy the constraint"
+        AnnihlErr::CommitCollision.to_string(),
+        "commitments would produce collision"
+    );
+
+    assert_eq!(
+        AnnihlErr::PointMismatch.to_string(),
+        "pair base curve point mismatch"
+    );
+
+    assert_eq!(
+        AnnihlErr::UnauthBody.to_string(),
+        "unable to authenticate solution body"
     );
 }

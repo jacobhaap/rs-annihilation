@@ -1,19 +1,19 @@
 [package]
 name = "annihilation"
-version = "0.1.0-alpha.1"
-edition = "2024"
-description = "Annihilative Keys"
-readme = "README.md"
+version = "0.1.0-alpha.2"
+description = """
+Pure Rust implementation of Annihilative Keys, cryptographic key/antikey pairs
+bound by proof-of-work and elliptic curve point relationships.
+"""
+authors = ["Jacob V. B. Haap"]
+license = "MIT"
+documentation = "https://docs.rs/annihilation"
 homepage = "https://github.com/jacobhaap/rs-annihilation"
 repository = "https://gitlab.com/jacobhaap/rs-annihilation"
-license = "MIT"
-keywords = ["crypto", "proof-of-work", "kdf", "curve25519", "ed25519"]
+keywords = ["crypto", "proof-of-work", "kdf", "curve25519"]
 categories = ["cryptography"]
-
-[features]
-default = []
-convergent = ["ed25519-dalek"]
-divergent = ["ed25519-dalek"]
+readme = "README.md"
+edition = "2024"
 
 [dependencies]
 curve25519-dalek = "4.1.3"
@@ -23,5 +23,7 @@ sha2 = "0.10.9"
 subtle = "2.6.1"
 zeroize = { version = "1.8.2", features = ["derive"] }
 
-[dev-dependencies]
-hex-literal = "1.1.0"
+[features]
+default = []
+convergent = ["ed25519-dalek"]
+divergent = ["ed25519-dalek"]

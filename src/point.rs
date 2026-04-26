@@ -1,145 +1,198 @@
 use curve25519_dalek::{
     EdwardsPoint, Scalar, constants::ED25519_BASEPOINT_TABLE,
 };
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+use zeroize::Zeroize;
 
-use crate::annihilative::{ANTIKEY_MAGIC, AnnihilativeKey, KEY_MAGIC};
-use crate::errors::AnnihilationError;
+use crate::AnnihlErr;
+use crate::annihilative::{ANTIKEY_MAGIC, AnnihlKey, KEY_MAGIC};
+use crate::solution::Solution;
 
-/// A zero-sized namespace providing functions for elliptic curve point
-/// operations on Curve25519 for annihilative keys.
+/// A zero-sized namespace providing functionality for elliptic curve point
+/// operations for annihilative keys.
 pub struct Point;
 
 impl Point {
-    /// Derive the shared base point between key and antikey solution bytes.
+    /// Derive a shared base curve point between two solutions.
     ///
-    /// Each solution is converted to a [Scalar] and multiplied against the
-    /// [ED25519_BASEPOINT_TABLE]. The resulting points are added together
-    /// to produce teh shared base point for the annihilative pair.
-    pub fn shared_base(key: &[u8; 32], antikey: &[u8; 32]) -> EdwardsPoint {
-        let key_scalar = Scalar::from_bytes_mod_order(*key);
-        let anti_scalar = Scalar::from_bytes_mod_order(*antikey);
-        let key_point = &Self::scalar_mult(key_scalar);
-        let anti_point = &Self::scalar_mult(anti_scalar);
-        key_point + anti_point
+    /// Converts each solution to a [Scalar] and multiplies against the
+    /// [ED25519_BASEPOINT_TABLE] to produce two curve points, returning
+    /// their sum.
+    pub fn shared_base(key: &Solution, antikey: &Solution) -> EdwardsPoint {
+        let mut k_bytes = key.to_bytes();
+        let mut a_bytes = antikey.to_bytes();
+        let mut k_scalar = Scalar::from_bytes_mod_order(k_bytes);
+        let mut a_scalar = Scalar::from_bytes_mod_order(a_bytes);
+        k_bytes.zeroize();
+        a_bytes.zeroize();
+
+        let mut k_point = &k_scalar * ED25519_BASEPOINT_TABLE;
+        let mut a_point = &a_scalar * ED25519_BASEPOINT_TABLE;
+        k_scalar.zeroize();
+        a_scalar.zeroize();
+
+        let base_point = k_point + a_point;
+        k_point.zeroize();
+        a_point.zeroize();
+
+        base_point
     }
-    /// Recover the shared base point of an annihilative pair from an
-    /// [AnnihilativeKey].
+
+    /// Recover the base curve point of an [AnnihlKey].
     ///
-    /// Subtracts an offset of the magic constant + commitment from the key's
-    /// decompressed curve point to recover the base point. Returns an error
-    /// if the key's curve point point cannot be decompressed.
-    pub fn recover_base(
-        key: &AnnihilativeKey,
-    ) -> Result<EdwardsPoint, AnnihilationError> {
-        // Determine magic constant for key or antikey
-        let is_key = (key.solution.identity & 0x80) == 0;
-        let magic = if is_key { KEY_MAGIC } else { ANTIKEY_MAGIC };
-        // Derive magic and commitment points, add for offset
+    /// Using the key's solution, subtracts a commitment-derived offset from
+    /// the key's point to recover the base curve point.
+    pub fn recover_base(key: &AnnihlKey) -> EdwardsPoint {
+        let is_key = Choice::from(((key.solution.identity & 0x80) == 0) as u8);
+        let magic = u64::conditional_select(&ANTIKEY_MAGIC, &KEY_MAGIC, is_key);
+
         let m_point = Self::from_u64(magic);
-        let c_point = Self::from_u64(key.solution.commitment);
-        let offset = m_point + c_point;
-        // Subtract offset to recover the shared base point
-        match key.point.decompress() {
-            Some(point) => Ok(point - offset),
-            None => return Err(AnnihilationError::PointRecovery),
+        let mut c_point = Self::from_u64(key.solution.commitment);
+        let mut offset = m_point + c_point;
+
+        let base_point = key.to_edwards_point() - offset;
+        c_point.zeroize();
+        offset.zeroize();
+
+        base_point
+    }
+
+    /// Verify that an annihilative pair share the same base curve point.
+    ///
+    /// For both member of the pair, base curve points are recovered using
+    /// each member's solution, subtracting a commitment-derived offset from
+    /// the member's point to recover the base point. Both recovered points
+    /// are compared to check for a match.
+    ///
+    /// Returns an error if the base curve points for each member of the pair
+    /// do not match.
+    pub fn verify_pair(
+        key: &AnnihlKey,
+        antikey: &AnnihlKey,
+    ) -> Result<(), AnnihlErr> {
+        // Recovered base points for key and antikey should match
+        let mut k_base = Point::recover_base(&key);
+        let mut a_base = Point::recover_base(&antikey);
+        if !bool::from(k_base.ct_eq(&a_base)) {
+            k_base.zeroize();
+            a_base.zeroize();
+
+            return Err(AnnihlErr::PointMismatch);
         }
+        a_base.zeroize();
+
+        // Recalculated shared base point should match expected point
+        let mut base = Point::shared_base(&key.solution, &antikey.solution);
+        if !bool::from(k_base.ct_eq(&base)) {
+            k_base.zeroize();
+            base.zeroize();
+
+            return Err(AnnihlErr::PointMismatch);
+        }
+        k_base.zeroize();
+        base.zeroize();
+
+        Ok(())
     }
-    /// Derive a curve point from a u64 value by constructing a [Scalar]
-    /// from the value and multiplying against the [ED25519_BASEPOINT_TABLE].
+
+    /// Derive a curve point by constructing a Scalar from a `u64` value,
+    /// then multiplying it against the [ED25519_BASEPOINT_TABLE].
     pub fn from_u64(val: u64) -> EdwardsPoint {
-        let scalar = Scalar::from(val);
-        Self::scalar_mult(scalar)
-    }
-    fn scalar_mult(scalar: Scalar) -> EdwardsPoint {
-        &scalar * ED25519_BASEPOINT_TABLE
+        let mut scalar = Scalar::from(val);
+        let point = &scalar * ED25519_BASEPOINT_TABLE;
+
+        scalar.zeroize();
+        point
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use curve25519_dalek::traits::Identity;
+
     use super::*;
-    use crate::annihilative::AnnihilativeSolution;
-    use curve25519_dalek::edwards::CompressedEdwardsY;
-    use hex_literal::hex;
+    use crate::annihilative::AnnihlKey;
 
-    /// Construct a test key from static values and hex string literals.
-    fn test_key() -> AnnihilativeKey {
-        let solution = AnnihilativeSolution {
-            identity: 96,
-            commitment: 5764305080309989910,
-            body: hex!("f0ba820d877d17bde069485f536653c1acd2242d9a10"),
-            constraint: 16,
-        };
-        let point = CompressedEdwardsY::from_slice(&hex!(
-            "3c7f61f8aa2405f42d815e310a6091c7fb94df764c296a7c777cd108bdae7742"
-        ))
-        .expect("hex string should represent curve point bytes");
-        AnnihilativeKey { solution, point }
-    }
+    const IKM: &'static [u8; 20] = b"End Of The World Sun";
+    const IAM: &'static [u8; 24] = b"Outlier/EOTWS_Variation1";
+    const ALT_IKM: &'static [u8; 25] = b"65 Doesn't Understand You";
+    const ALT_IAM: &'static [u8; 21] = b"Unmake the Wild Light";
 
-    /// Construct a test antikey from static values and hex string literals.
-    fn test_antikey() -> AnnihilativeKey {
-        let solution = AnnihilativeSolution {
-            identity: 133,
-            commitment: 5230833101896872809,
-            body: hex!("f3ea7f7f9d35dac8904beec93fec5ff0b41e852b7d1b"),
-            constraint: 16,
-        };
-        let point = CompressedEdwardsY::from_slice(&hex!(
-            "9dd0d77e09d089fc4fff6c49c2d5c9f5b515369bf532caaf739a7e1ec3e6b3ec"
-        ))
-        .expect("hex string should represent curve point bytes");
-        AnnihilativeKey { solution, point }
-    }
+    #[test]
+    fn shared_base_is_commutative() {
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
 
-    /// Decompress a test shared base point from a static hex string literal.
-    fn test_base_point() -> EdwardsPoint {
-        CompressedEdwardsY::from_slice(&hex!(
-            "40568aff34637712aa09c5adc3f9915ec454a3000b705283666a7dcd488c66ad"
-        ))
-        .expect("hex string should represent curve point bytes")
-        .decompress()
-        .expect("invalid y-coordinate for curve point")
+        let base_1 = Point::shared_base(&k_sol, &a_sol);
+        let base_2 = Point::shared_base(&a_sol, &k_sol);
+
+        // Order must not matter, point addition is commutative
+        assert_eq!(base_1, base_2);
     }
 
     #[test]
-    fn test_shared_base() {
-        let key = test_key().solution.to_bytes();
-        let antikey = test_antikey().solution.to_bytes();
-        let expected = test_base_point();
-        // Create shared base point from key and antikey
-        let base_point = Point::shared_base(&key, &antikey);
-        // Shared base point must match expected point
-        assert_eq!(base_point, expected);
-    }
+    fn recover_base_with_key() {
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
 
-    #[test]
-    fn test_recover_base() {
-        let mut key = test_key();
-        let expected = test_base_point();
-        // Attempt to recover the shared base point. Recovered base point
-        // must match the expected point.
+        let shared_base = Point::shared_base(&k_sol, &a_sol);
+
+        let key = AnnihlKey::new(k_sol, shared_base);
         let recovered = Point::recover_base(&key);
-        assert_eq!(recovered, Ok(expected));
-        // Overwrite key point to one that cannot decompress. Shared base
-        // point recovery must fail for the invalid curve point.
-        key.point = CompressedEdwardsY(hex!(
-            "0202000000000000000000000000000000000000000000000000000000000000"
-        ));
-        let recovered = Point::recover_base(&key);
-        assert_eq!(recovered, Err(AnnihilationError::PointRecovery));
+
+        // Must recover shared base curve point from key alone
+        assert_eq!(recovered, shared_base);
     }
 
     #[test]
-    fn test_from_u64() {
-        // Create a point from a u64 magic constant
-        let point = Point::from_u64(KEY_MAGIC);
-        // Compress the point, then decompress to recover
-        let compressed = point.compress();
-        let decompressed = compressed
-            .decompress()
-            .expect("invalid y-coordinate for curve point");
-        // The decompressed point must match the original
-        assert_eq!(decompressed, point);
+    fn recover_base_with_antikey() {
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+
+        let shared_base = Point::shared_base(&k_sol, &a_sol);
+
+        let antikey = AnnihlKey::new(a_sol, shared_base);
+        let recovered = Point::recover_base(&antikey);
+
+        // Must recover shared base curve point from antikey alone
+        assert_eq!(recovered, shared_base);
+    }
+
+    #[test]
+    fn verify_pair_succeeds_valid_pair() {
+        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
+
+        // Valid pair must verify successfully
+        let result = Point::verify_pair(&key, &antikey);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn verify_pair_fails_recovered_bases_mismatch() {
+        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (_, antikey) = AnnihlKey::new_pair(ALT_IKM, ALT_IAM, 16);
+
+        // Mismatch between recovered key and antikey shared base curve
+        // points must result in an error
+        let result = Point::verify_pair(&key, &antikey);
+        assert_eq!(result, Err(AnnihlErr::PointMismatch));
+    }
+
+    #[test]
+    fn verify_pair_fails_shared_base_mismatch() {
+        let (mut key, mut antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
+
+        key.solution.commitment += 100;
+        antikey.solution.commitment += 100;
+
+        // Mismatch between recalculated and recovered shared base curve
+        // points must result in an error
+        let result = Point::verify_pair(&key, &antikey);
+        assert_eq!(result, Err(AnnihlErr::PointMismatch));
+    }
+
+    #[test]
+    fn from_u64_zero_produces_identity() {
+        let point = Point::from_u64(0);
+
+        // Zero scalar should produce the identity point
+        assert_eq!(point, EdwardsPoint::identity());
     }
 }

@@ -1,36 +1,28 @@
 # Annihilative Keys in Rust
-A Rust implementation of Annihilative Keys.
+
+![Crates.io Version](https://img.shields.io/crates/v/annihilation)
+![Crates.io License](https://img.shields.io/crates/l/annihilation)
+![docs.rs](https://img.shields.io/docsrs/annihilation)
+
+Pure Rust implementation of Annihilative Keys.
+
+[Documentation](https://docs.rs/annihilation/)
 
 > This project contains new and experimental cryptography that has not undergone any review or audit. In the absence of cryptanalysis, use at your own risk.
 
-Provides cryptographic key pairs where a key and antikey are each derived from separate keying material but must jointly satisfy a proof of work constraint. The mining process finds solutions where the SHA256 hash of the key XOR antikey begins with a specified number of zero bits, binding the pair cryptographically.
+# About
 
-Pairs can be verified by recovering and comparing their shared base curve point, and checking that the solutions satisfy the proof of work constraint. Valid pairs can be combined to produce a shared annihilation key.
+Annihilative Keys provide a novel construction where a pair of cryptographic keys, consisting of a key and antikey, are derived from separate keying materials. An annihilative key consists of:
 
-With the `convergent` feature, annihilative pairs can independently derive the same shared Ed25519 signing and verifying keys. With the `divergent` feature, each member of the pair derives its own unique Ed25519 identity.
+ - A mined proof-of-work solution, consisting of an identity byte, cryptographic commitment, authenticated body, and constraint parameter.
+ - A compressed elliptic curve point on Curve25519.
 
-```rust
-use annihilation::{AnnihilativeKey, Convergent, Divergent};
+A key and antikey together form an annihilative pair, bound through computational proof-of-work and an elliptic curve point relationship. A valid pair is capable of producing a symmetric key through annihilation. As long as one half of the pair remains secret, the secrecy of the derived annihilation key is preserved.
 
-fn main() {
-    let k_ikm = b"End Of The World Sun";
-    let a_ikm = b"Outlier/EOTWS_Variation1";
+# Minimum Supported Rust Version
 
-    let (key, antikey) = AnnihilativeKey::new_pair(k_ikm, a_ikm, 16);
+Rust **1.85.1** or higher.
 
-    let artifact = key.verify(&antikey);
-    assert!(artifact.is_ok());
+# License
 
-    let annihilation_key = key.to_annihilation(&antikey);
-    assert!(annihilation_key.is_ok());
-
-    let context = b"65daysofstatic";
-    let k_shared = key.shared_signing_key(Some(context));
-    let a_shared = antikey.shared_signing_key(Some(context));
-    assert_eq!(k_shared, a_shared);
-
-    let k_own = key.own_signing_key(Some(context));
-    let a_own = antikey.own_signing_key(Some(context));
-    assert_ne!(k_own, a_own);
-}
-```
+Licensed under the [MIT License](https://opensource.org/license/MIT).
