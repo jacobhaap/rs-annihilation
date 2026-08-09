@@ -5,7 +5,6 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::Zeroize;
 
 use crate::AnnihlErr;
-use crate::annihilative::AnnihlKey;
 use crate::constants::{ANTIKEY_MAGIC, KEY_MAGIC};
 use crate::solution::Solution;
 
@@ -34,19 +33,20 @@ pub fn shared_base(key: &Solution, antikey: &Solution) -> EdwardsPoint {
     base_point
 }
 
-/// Recover the base curve point of an [AnnihlKey].
+/// Recover the base curve point associated with a solution and its
+/// corresponding curve point.
 ///
-/// Using the key's solution, subtracts a commitment-derived offset from
-/// the key's point to recover the base curve point.
-pub fn recover_base(key: &AnnihlKey) -> EdwardsPoint {
-    let is_key = Choice::from(((key.solution.identity & 0x80) == 0) as u8);
+/// Subtracts a commitment-derived offset from the given point to recover
+/// the base curve point.
+pub fn recover_base(solution: &Solution, point: EdwardsPoint) -> EdwardsPoint {
+    let is_key = Choice::from(((solution.identity & 0x80) == 0) as u8);
     let magic = u64::conditional_select(&ANTIKEY_MAGIC, &KEY_MAGIC, is_key);
 
     let m_point = from_u64(magic);
-    let mut c_point = from_u64(key.solution.commitment);
+    let mut c_point = from_u64(solution.commitment);
     let mut offset = m_point + c_point;
 
-    let base_point = key.to_edwards_point() - offset;
+    let base_point = point - offset;
     c_point.zeroize();
     offset.zeroize();
 
@@ -63,12 +63,14 @@ pub fn recover_base(key: &AnnihlKey) -> EdwardsPoint {
 /// Returns an error if the base curve points for each member of the pair
 /// do not match.
 pub fn verify_pair(
-    key: &AnnihlKey,
-    antikey: &AnnihlKey,
+    key: &Solution,
+    k_point: EdwardsPoint,
+    antikey: &Solution,
+    a_point: EdwardsPoint,
 ) -> Result<(), AnnihlErr> {
     // Recovered base points for key and antikey should match
-    let mut k_base = recover_base(key);
-    let mut a_base = recover_base(antikey);
+    let mut k_base = recover_base(key, k_point);
+    let mut a_base = recover_base(antikey, a_point);
     if !bool::from(k_base.ct_eq(&a_base)) {
         k_base.zeroize();
         a_base.zeroize();
@@ -78,7 +80,7 @@ pub fn verify_pair(
     a_base.zeroize();
 
     // Recalculated shared base point should match expected point
-    let mut base = shared_base(&key.solution, &antikey.solution);
+    let mut base = shared_base(key, antikey);
     if !bool::from(k_base.ct_eq(&base)) {
         k_base.zeroize();
         base.zeroize();
@@ -103,15 +105,27 @@ pub fn from_u64(val: u64) -> EdwardsPoint {
 
 #[cfg(test)]
 mod tests {
-    use curve25519_dalek::traits::Identity;
-
     use super::*;
-    use crate::annihilative::AnnihlKey;
+    use curve25519_dalek::traits::Identity;
 
     const IKM: &'static [u8; 20] = b"End Of The World Sun";
     const IAM: &'static [u8; 24] = b"Outlier/EOTWS_Variation1";
     const ALT_IKM: &'static [u8; 25] = b"65 Doesn't Understand You";
     const ALT_IAM: &'static [u8; 21] = b"Unmake the Wild Light";
+
+    fn derive_point(
+        solution: &Solution,
+        base_point: EdwardsPoint,
+    ) -> EdwardsPoint {
+        let is_key = Choice::from(((solution.identity & 0x80) == 0) as u8);
+        let magic = u64::conditional_select(&ANTIKEY_MAGIC, &KEY_MAGIC, is_key);
+
+        let m_point = from_u64(magic);
+        let c_point = from_u64(solution.commitment);
+        let offset = m_point + c_point;
+
+        base_point + offset
+    }
 
     #[test]
     fn shared_base_is_commutative() {
@@ -130,8 +144,8 @@ mod tests {
 
         let shared_base = shared_base(&k_sol, &a_sol);
 
-        let key = AnnihlKey::new(k_sol, shared_base);
-        let recovered = recover_base(&key);
+        let k_point = derive_point(&k_sol, shared_base);
+        let recovered = recover_base(&k_sol, k_point);
 
         // Must recover shared base curve point from key alone
         assert_eq!(recovered, shared_base);
@@ -143,8 +157,8 @@ mod tests {
 
         let shared_base = shared_base(&k_sol, &a_sol);
 
-        let antikey = AnnihlKey::new(a_sol, shared_base);
-        let recovered = recover_base(&antikey);
+        let a_point = derive_point(&a_sol, shared_base);
+        let recovered = recover_base(&a_sol, a_point);
 
         // Must recover shared base curve point from antikey alone
         assert_eq!(recovered, shared_base);
@@ -152,34 +166,48 @@ mod tests {
 
     #[test]
     fn verify_pair_succeeds_valid_pair() {
-        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+        let shared_base = shared_base(&k_sol, &a_sol);
+
+        let k_point = derive_point(&k_sol, shared_base);
+        let a_point = derive_point(&a_sol, shared_base);
 
         // Valid pair must verify successfully
-        let result = verify_pair(&key, &antikey);
+        let result = verify_pair(&k_sol, k_point, &a_sol, a_point);
         assert!(result.is_ok());
     }
 
     #[test]
     fn verify_pair_fails_recovered_bases_mismatch() {
-        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 16);
-        let (_, antikey) = AnnihlKey::new_pair(ALT_IKM, ALT_IAM, 16);
+        let (k_sol, _) = Solution::mine(IKM, IAM, 16);
+        let (_, a_sol) = Solution::mine(ALT_IKM, ALT_IAM, 16);
+
+        let k_base = shared_base(&k_sol, &k_sol);
+        let a_base = shared_base(&a_sol, &a_sol);
+
+        let k_point = derive_point(&k_sol, k_base);
+        let a_point = derive_point(&a_sol, a_base);
 
         // Mismatch between recovered key and antikey shared base curve
         // points must result in an error
-        let result = verify_pair(&key, &antikey);
+        let result = verify_pair(&k_sol, k_point, &a_sol, a_point);
         assert_eq!(result, Err(AnnihlErr::PointMismatch));
     }
 
     #[test]
     fn verify_pair_fails_shared_base_mismatch() {
-        let (mut key, mut antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (mut k_sol, mut a_sol) = Solution::mine(IKM, IAM, 16);
+        let shared_base = shared_base(&k_sol, &a_sol);
 
-        key.solution.commitment += 100;
-        antikey.solution.commitment += 100;
+        let k_point = derive_point(&k_sol, shared_base);
+        let a_point = derive_point(&a_sol, shared_base);
+
+        k_sol.commitment += 100;
+        a_sol.commitment += 100;
 
         // Mismatch between recalculated and recovered shared base curve
         // points must result in an error
-        let result = verify_pair(&key, &antikey);
+        let result = verify_pair(&k_sol, k_point, &a_sol, a_point);
         assert_eq!(result, Err(AnnihlErr::PointMismatch));
     }
 

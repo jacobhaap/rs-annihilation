@@ -81,7 +81,12 @@ impl AnnihlKey {
         };
 
         // Shared base between curve points should match
-        verify_pair(key, antikey)?;
+        verify_pair(
+            &key.solution,
+            key.to_edwards_point(),
+            &antikey.solution,
+            antikey.to_edwards_point(),
+        )?;
 
         // Hash of key XOR antikey must satisfy the PoW constraint
         key.solution.verify(&antikey.solution)
@@ -360,8 +365,9 @@ mod tests {
         assert!(antikey.solution.identity >= 0x80);
 
         // Valid annihilative pair must share a base point
-        let k_base = recover_base(&key);
-        let a_base = recover_base(&antikey);
+        let k_base = recover_base(&key.solution, key.to_edwards_point());
+        let a_base =
+            recover_base(&antikey.solution, antikey.to_edwards_point());
         assert_eq!(k_base, a_base);
     }
 
