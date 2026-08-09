@@ -5,7 +5,8 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::Zeroize;
 
 use crate::AnnihlErr;
-use crate::annihilative::{ANTIKEY_MAGIC, AnnihlKey, KEY_MAGIC};
+use crate::annihilative::AnnihlKey;
+use crate::constants::{ANTIKEY_MAGIC, KEY_MAGIC};
 use crate::solution::Solution;
 
 /// Derive a shared base curve point between two solutions.

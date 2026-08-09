@@ -5,7 +5,7 @@ use subtle::{
 };
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::annihilative::{ANTIKEY_MAGIC, KEY_MAGIC};
+use crate::constants::{ANTIKEY_MAGIC, KEY_MAGIC};
 use crate::errors::AnnihlErr;
 
 const KEY_DOMAIN_BYTE: u8 = 0x4B;

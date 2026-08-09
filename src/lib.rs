@@ -94,6 +94,7 @@
 //! }
 //! ```
 mod annihilative;
+mod constants;
 mod errors;
 mod point;
 mod solution;

@@ -8,21 +8,10 @@ use sha2::Sha256;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+use crate::constants::{ANTIKEY_MAGIC, KEY_MAGIC};
 use crate::errors::AnnihlErr;
 use crate::point::*;
 use crate::solution::{Identity, Solution};
-
-/// Golden ratio-derived magic constant equal to `floor(2^64 / φ)`,
-/// where φ is the golden ratio.
-///
-/// Used to derive curve point offsets for keys.
-pub const KEY_MAGIC: u64 = 0x9E3779B97F4A7C15;
-
-/// Negated golden ratio-derived magic constant equal to
-/// `2^64 - floor(2^64 / φ)`, where φ is the golden ratio.
-///
-/// Used to derive curve point offsets for antikeys.
-pub const ANTIKEY_MAGIC: u64 = 0x61C8864680B583EB;
 
 #[cfg(feature = "convergent")]
 const CONVERGENT_DOMAIN_BYTE: u8 = 0x43;
