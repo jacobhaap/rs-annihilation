@@ -86,7 +86,7 @@ impl AnnihlKey {
     /// Returns the XOR hash as an artifact on success, or an error when the
     /// members do not form a valid annihilative pair.
     pub fn verify(&self, other: &Self) -> Result<[u8; 32], AnnihlErr> {
-        let (key, antikey) = match Self::validate_pair(&self, &other) {
+        let (key, antikey) = match Self::validate_pair(self, other) {
             Ok(pair) => pair,
             Err(e) => return Err(e),
         };
@@ -120,7 +120,7 @@ impl AnnihlKey {
     /// pair is invalid or the proof-of-work constraint is not satisfied.
     pub fn to_annihilation(&self, other: &Self) -> Result<[u8; 32], AnnihlErr> {
         // Artifact of constrained XOR hash
-        let mut artifact = match self.verify(&other) {
+        let mut artifact = match self.verify(other) {
             Ok(hash) => hash,
             Err(e) => return Err(e),
         };

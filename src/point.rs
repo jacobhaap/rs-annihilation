@@ -71,8 +71,8 @@ impl Point {
         antikey: &AnnihlKey,
     ) -> Result<(), AnnihlErr> {
         // Recovered base points for key and antikey should match
-        let mut k_base = Point::recover_base(&key);
-        let mut a_base = Point::recover_base(&antikey);
+        let mut k_base = Point::recover_base(key);
+        let mut a_base = Point::recover_base(antikey);
         if !bool::from(k_base.ct_eq(&a_base)) {
             k_base.zeroize();
             a_base.zeroize();

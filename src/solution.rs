@@ -120,7 +120,7 @@ impl Solution {
     /// Returns the hash as an artifact on success, or an error when a
     /// constraint mismatch or unsatisfied constraint is encountered.
     pub fn verify(&self, other: &Solution) -> Result<[u8; 32], AnnihlErr> {
-        let (key, antikey) = match Self::validate_pair(&self, &other) {
+        let (key, antikey) = match Self::validate_pair(self, other) {
             Ok(pair) => pair,
             Err(e) => return Err(e),
         };
@@ -157,7 +157,7 @@ impl Solution {
         antikey_bytes.zeroize();
 
         let mut hasher = Sha256::new();
-        hasher.update(&pair_xor);
+        hasher.update(pair_xor);
         let mut xor_hash: [u8; 32] = hasher.finalize().into();
         pair_xor.zeroize();
 
@@ -239,10 +239,10 @@ impl Solution {
         domain: u8,
     ) -> [u8; 32] {
         let mut hasher = Sha256::new();
-        hasher.update(&[domain]);
-        hasher.update(&ikm);
-        hasher.update(&nonce.to_le_bytes());
-        hasher.update(&[constraint]);
+        hasher.update([domain]);
+        hasher.update(ikm);
+        hasher.update(nonce.to_le_bytes());
+        hasher.update([constraint]);
         let mut okm: [u8; 32] = hasher.finalize().into();
 
         let identity = okm[0];
