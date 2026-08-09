@@ -100,5 +100,5 @@ mod solution;
 
 pub use crate::annihilative::AnnihlKey;
 pub use crate::errors::AnnihlErr;
-pub use crate::point::Point;
+pub use crate::point::*;
 pub use crate::solution::Solution;

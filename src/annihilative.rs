@@ -9,7 +9,7 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::errors::AnnihlErr;
-use crate::point::Point;
+use crate::point::*;
 use crate::solution::{Identity, Solution};
 
 /// Golden ratio-derived magic constant equal to `floor(2^64 / φ)`,
@@ -47,8 +47,8 @@ impl AnnihlKey {
         let is_key = Choice::from(((solution.identity & 0x80) == 0) as u8);
         let magic = u64::conditional_select(&ANTIKEY_MAGIC, &KEY_MAGIC, is_key);
 
-        let m_point = Point::from_u64(magic);
-        let mut c_point = Point::from_u64(solution.commitment);
+        let m_point = from_u64(magic);
+        let mut c_point = from_u64(solution.commitment);
         let mut offset = m_point + c_point;
 
         let mut sum = base_point + offset;
@@ -68,7 +68,7 @@ impl AnnihlKey {
     /// at an offset from the pair's shared base curve point.
     pub fn new_pair(ikm: &[u8], iam: &[u8], n: u8) -> (Self, Self) {
         let pair = Solution::mine(ikm, iam, n);
-        let mut base_point = Point::shared_base(&pair.0, &pair.1);
+        let mut base_point = shared_base(&pair.0, &pair.1);
 
         let key = Self::new(pair.0, base_point);
         let antikey = Self::new(pair.1, base_point);
@@ -92,7 +92,7 @@ impl AnnihlKey {
         };
 
         // Shared base between curve points should match
-        Point::verify_pair(key, antikey)?;
+        verify_pair(key, antikey)?;
 
         // Hash of key XOR antikey must satisfy the PoW constraint
         key.solution.verify(&antikey.solution)
@@ -189,7 +189,7 @@ impl AnnihlKey {
     /// pair, meaning the other pair member can independently derive the same
     /// signing key.
     pub fn shared_signing_key(&self, context: Option<&[u8]>) -> SigningKey {
-        let mut base_point = Point::recover_base(&self);
+        let mut base_point = recover_base(&self);
         let mut compressed_point = base_point.compress();
 
         let context_bytes = context.unwrap_or(&[]);
@@ -329,15 +329,15 @@ mod tests {
     #[test]
     fn new_uses_correct_magic_for_key() {
         let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
-        let base_point = Point::shared_base(&k_sol, &a_sol);
+        let base_point = shared_base(&k_sol, &a_sol);
 
         // Constructor should apply key magic constant
         let k_commit = k_sol.commitment.clone();
         let key = AnnihlKey::new(k_sol, base_point);
 
         // Calculate expected point from magic and commitment
-        let m_point = Point::from_u64(KEY_MAGIC);
-        let c_point = Point::from_u64(k_commit);
+        let m_point = from_u64(KEY_MAGIC);
+        let c_point = from_u64(k_commit);
         let expected = base_point + m_point + c_point;
 
         // Key point must match expectation (correct magic used)
@@ -347,15 +347,15 @@ mod tests {
     #[test]
     fn new_uses_correct_magic_for_antikey() {
         let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
-        let base_point = Point::shared_base(&k_sol, &a_sol);
+        let base_point = shared_base(&k_sol, &a_sol);
 
         // Constructor should apply antikey magic constant
         let a_commit = a_sol.commitment.clone();
         let antikey = AnnihlKey::new(a_sol, base_point);
 
         // Calculate expected point from magic and commitment
-        let m_point = Point::from_u64(ANTIKEY_MAGIC);
-        let c_point = Point::from_u64(a_commit);
+        let m_point = from_u64(ANTIKEY_MAGIC);
+        let c_point = from_u64(a_commit);
         let expected = base_point + m_point + c_point;
 
         // Antikey point must match expectation (correct magic used)
@@ -371,8 +371,8 @@ mod tests {
         assert!(antikey.solution.identity >= 0x80);
 
         // Valid annihilative pair must share a base point
-        let k_base = Point::recover_base(&key);
-        let a_base = Point::recover_base(&antikey);
+        let k_base = recover_base(&key);
+        let a_base = recover_base(&antikey);
         assert_eq!(k_base, a_base);
     }
 
