@@ -66,8 +66,8 @@ impl AnnihlKey {
     /// Returns a pair that satisfies the given proof-of-work constraint, where
     /// each `AnnihlKey` consists of the mined [Solution], and an [EdwardsPoint]
     /// at an offset from the pair's shared base curve point.
-    pub fn new_pair(ikm: &[u8], iam: &[u8], constraint: u8) -> (Self, Self) {
-        let pair = Solution::mine(ikm, iam, constraint);
+    pub fn new_pair(ikm: &[u8], iam: &[u8], n: u8) -> (Self, Self) {
+        let pair = Solution::mine(ikm, iam, n);
         let mut base_point = Point::shared_base(&pair.0, &pair.1);
 
         let key = Self::new(pair.0, base_point);

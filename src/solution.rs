@@ -69,21 +69,17 @@ impl Solution {
     /// begins with a number of leading zero bits to satisfy the constraint.
     ///
     /// Each solution's body is authenticated by its keying material.
-    pub fn mine(
-        ikm: &[u8],
-        iam: &[u8],
-        constraint: u8,
-    ) -> (Solution, Solution) {
+    pub fn mine(ikm: &[u8], iam: &[u8], n: u8) -> (Solution, Solution) {
         let mut nonce = 0u128;
 
         loop {
             let mut key_solution =
-                Self::derive_key(ikm, nonce, constraint, KEY_DOMAIN_BYTE);
+                Self::derive_key(ikm, nonce, n, KEY_DOMAIN_BYTE);
             let mut antikey_solution =
-                Self::derive_key(iam, nonce, constraint, ANTIKEY_DOMAIN_BYTE);
+                Self::derive_key(iam, nonce, n, ANTIKEY_DOMAIN_BYTE);
 
-            key_solution[31] = constraint;
-            antikey_solution[31] = constraint;
+            key_solution[31] = n;
+            antikey_solution[31] = n;
 
             // 0x7F or below identifies key, 0x80 or above identifies antikey
             let k_id_ok = Choice::from((key_solution[0] <= 0x7F) as u8);
@@ -125,7 +121,7 @@ impl Solution {
             Err(e) => return Err(e),
         };
 
-        let constraint = key.constraint as usize;
+        let n = key.constraint as usize;
         if !bool::from(key.constraint.ct_eq(&antikey.constraint)) {
             return Err(AnnihlErr::ConstraintMatch);
         }
@@ -161,8 +157,8 @@ impl Solution {
         let mut xor_hash: [u8; 32] = hasher.finalize().into();
         pair_xor.zeroize();
 
-        let bytes = constraint / 8;
-        let bits = constraint % 8;
+        let bytes = n / 8;
+        let bits = n % 8;
 
         // Verify first N bytes are zero, following N bits are zero
         let mut satisfied = Choice::from(1u8);
@@ -232,25 +228,19 @@ impl Solution {
         bytes
     }
 
-    fn derive_key(
-        ikm: &[u8],
-        nonce: u128,
-        constraint: u8,
-        domain: u8,
-    ) -> [u8; 32] {
+    fn derive_key(ikm: &[u8], nonce: u128, n: u8, domain: u8) -> [u8; 32] {
         let mut hasher = Sha256::new();
         hasher.update([domain]);
         hasher.update(ikm);
         hasher.update(nonce.to_le_bytes());
-        hasher.update([constraint]);
+        hasher.update([n]);
         let mut okm: [u8; 32] = hasher.finalize().into();
 
         let identity = okm[0];
         let commitment = &okm[1..9];
 
-        let mut body = Self::authenticate_ikm(
-            ikm, identity, commitment, constraint, domain,
-        );
+        let mut body =
+            Self::authenticate_ikm(ikm, identity, commitment, n, domain);
 
         okm[9..31].copy_from_slice(&body);
         body.zeroize();
@@ -261,7 +251,7 @@ impl Solution {
         ikm: &[u8],
         identity: u8,
         commitment: &[u8],
-        constraint: u8,
+        n: u8,
         domain: u8,
     ) -> [u8; 22] {
         let mut mac = Hmac::<Sha256>::new_from_slice(ikm)
@@ -269,7 +259,7 @@ impl Solution {
         mac.update(&[domain]);
         mac.update(&[identity]);
         mac.update(commitment);
-        mac.update(&[constraint]);
+        mac.update(&[n]);
         let mut digest: [u8; 32] = mac.finalize().into_bytes().into();
 
         let mut body = [0u8; 22];
