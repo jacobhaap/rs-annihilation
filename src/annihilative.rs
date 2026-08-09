@@ -13,11 +13,13 @@ use crate::errors::AnnihlErr;
 use crate::point::*;
 use crate::solution::{Identity, Solution};
 
+/// Domain separation byte for convergent signing and verifying keys.
 #[cfg(feature = "convergent")]
-const CONVERGENT_DOMAIN_BYTE: u8 = 0x43;
+const CONVERGENT: u8 = 0x43;
 
+/// Domain separation byte for divergent signing and verifying keys.
 #[cfg(feature = "divergent")]
-const DIVERGENT_DOMAIN_BYTE: u8 = 0x44;
+const DIVERGENT: u8 = 0x44;
 
 /// An `AnnihlKey` represents the mined proof-of-work solution
 /// and elliptic curve point of an annihilative key.
@@ -189,7 +191,7 @@ impl AnnihlKey {
         let context_bytes = context.unwrap_or(&[]);
 
         let mut hasher = Sha256::new();
-        hasher.update(&[CONVERGENT_DOMAIN_BYTE]);
+        hasher.update(&[CONVERGENT]);
         hasher.update(compressed_point.as_bytes());
         hasher.update(&context_bytes);
         let mut keying_material: [u8; 32] = hasher.finalize().into();
@@ -227,7 +229,7 @@ impl AnnihlKey {
         let context_bytes = context.unwrap_or(&[]);
 
         let mut hasher = Sha256::new();
-        hasher.update(&[DIVERGENT_DOMAIN_BYTE]);
+        hasher.update(&[DIVERGENT]);
         hasher.update(&solution_bytes);
         hasher.update(&context_bytes);
         let mut keying_material: [u8; 32] = hasher.finalize().into();

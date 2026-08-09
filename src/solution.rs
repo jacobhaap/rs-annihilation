@@ -8,8 +8,11 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::constants::{ANTIKEY_MAGIC, KEY_MAGIC};
 use crate::errors::AnnihlErr;
 
-const KEY_DOMAIN_BYTE: u8 = 0x4B;
-const ANTIKEY_DOMAIN_BYTE: u8 = 0x41;
+/// Domain separation byte for keys.
+const KEY: u8 = 0x4B;
+
+/// Domain separation byte for antikeys.
+const ANTIKEY: u8 = 0x41;
 
 pub(crate) trait Identity {
     fn identity_byte(&self) -> u8;
@@ -73,10 +76,8 @@ impl Solution {
         let mut nonce = 0u128;
 
         loop {
-            let mut key_solution =
-                Self::derive_key(ikm, nonce, n, KEY_DOMAIN_BYTE);
-            let mut antikey_solution =
-                Self::derive_key(iam, nonce, n, ANTIKEY_DOMAIN_BYTE);
+            let mut key_solution = Self::derive_key(ikm, nonce, n, KEY);
+            let mut antikey_solution = Self::derive_key(iam, nonce, n, ANTIKEY);
 
             key_solution[31] = n;
             antikey_solution[31] = n;
@@ -187,11 +188,7 @@ impl Solution {
     /// Returns an error if the recomputed body does not match the actual body.
     pub fn authenticate(&self, ikm: &[u8]) -> Result<(), AnnihlErr> {
         let is_key = Choice::from((self.identity <= 0x7F) as u8);
-        let domain = u8::conditional_select(
-            &ANTIKEY_DOMAIN_BYTE,
-            &KEY_DOMAIN_BYTE,
-            is_key,
-        );
+        let domain = u8::conditional_select(&KEY, &ANTIKEY, is_key);
 
         let mut commitment = self.commitment.to_le_bytes();
         let mut body = Self::authenticate_ikm(
