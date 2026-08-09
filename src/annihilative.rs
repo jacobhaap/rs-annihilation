@@ -1,9 +1,5 @@
 use curve25519_dalek::{EdwardsPoint, edwards::CompressedEdwardsY};
-#[cfg(any(feature = "convergent", feature = "divergent"))]
-use ed25519_dalek::{SigningKey, VerifyingKey};
 use hmac::{Hmac, Mac};
-#[cfg(any(feature = "convergent", feature = "divergent"))]
-use sha2::Digest;
 use sha2::Sha256;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -12,14 +8,6 @@ use crate::constants::{ANTIKEY_MAGIC, KEY_MAGIC};
 use crate::errors::AnnihlErr;
 use crate::point::*;
 use crate::solution::{Identity, Solution};
-
-/// Domain separation byte for convergent signing and verifying keys.
-#[cfg(feature = "convergent")]
-const CONVERGENT: u8 = 0x43;
-
-/// Domain separation byte for divergent signing and verifying keys.
-#[cfg(feature = "divergent")]
-const DIVERGENT: u8 = 0x44;
 
 /// An `AnnihlKey` represents the mined proof-of-work solution
 /// and elliptic curve point of an annihilative key.
@@ -174,81 +162,6 @@ impl AnnihlKey {
         self.point
             .decompress()
             .expect("point validated during construction")
-    }
-}
-
-#[cfg(feature = "convergent")]
-impl AnnihlKey {
-    /// Derive a [SigningKey] from an `AnnihlKey`.
-    ///
-    /// The signing key produced is shared between members of an annihilative
-    /// pair, meaning the other pair member can independently derive the same
-    /// signing key.
-    pub fn shared_signing_key(&self, context: Option<&[u8]>) -> SigningKey {
-        let mut base_point = recover_base(&self);
-        let mut compressed_point = base_point.compress();
-
-        let context_bytes = context.unwrap_or(&[]);
-
-        let mut hasher = Sha256::new();
-        hasher.update(&[CONVERGENT]);
-        hasher.update(compressed_point.as_bytes());
-        hasher.update(&context_bytes);
-        let mut keying_material: [u8; 32] = hasher.finalize().into();
-
-        let signing_key = SigningKey::from_bytes(&keying_material);
-
-        base_point.zeroize();
-        compressed_point.zeroize();
-        keying_material.zeroize();
-
-        signing_key
-    }
-
-    /// Derive a [VerifyingKey] from an `AnnihlKey`.
-    ///
-    /// The verifying key produced is shared between members of an annihilative
-    /// pair, meaning the other pair member can independently derive the same
-    /// verifying key.
-    pub fn shared_verifying_key(&self, context: Option<&[u8]>) -> VerifyingKey {
-        let signing_key = self.shared_signing_key(context);
-        signing_key.verifying_key()
-    }
-}
-
-#[cfg(feature = "divergent")]
-impl AnnihlKey {
-    /// Derive a [SigningKey] from an `AnnihlKey`.
-    ///
-    /// The signing key produced is unique within an annihilative pair,
-    /// meaning the other pair member cannot independently derive the
-    /// same signing key.
-    pub fn own_signing_key(&self, context: Option<&[u8]>) -> SigningKey {
-        let mut solution_bytes = self.solution.to_bytes();
-
-        let context_bytes = context.unwrap_or(&[]);
-
-        let mut hasher = Sha256::new();
-        hasher.update(&[DIVERGENT]);
-        hasher.update(&solution_bytes);
-        hasher.update(&context_bytes);
-        let mut keying_material: [u8; 32] = hasher.finalize().into();
-
-        let signing_key = SigningKey::from_bytes(&keying_material);
-        solution_bytes.zeroize();
-        keying_material.zeroize();
-
-        signing_key
-    }
-
-    /// Derive a [VerifyingKey] from an `AnnihlKey`.
-    ///
-    /// The verifying key produced is unique within an annihilative pair,
-    /// meaning the other pair member cannot independently derive the same
-    /// verifying key.
-    pub fn own_verifying_key(&self, context: Option<&[u8]>) -> VerifyingKey {
-        let signing_key = self.own_signing_key(context);
-        signing_key.verifying_key()
     }
 }
 
@@ -458,54 +371,6 @@ mod tests {
 
         // Recompressed point should match stored point
         assert_eq!(key.point.as_bytes(), recompressed.as_bytes());
-    }
-
-    #[cfg(feature = "convergent")]
-    #[test]
-    fn shared_signing_key_matches_pair() {
-        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
-
-        let k_signing = key.shared_signing_key(None);
-        let a_signing = antikey.shared_signing_key(None);
-
-        // Signing keys must match between pair members
-        assert_eq!(k_signing.to_bytes(), a_signing.to_bytes());
-    }
-
-    #[cfg(feature = "convergent")]
-    #[test]
-    fn shared_verifying_key_matches_pair() {
-        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
-
-        let k_verifying = key.shared_verifying_key(None);
-        let a_verifying = antikey.shared_verifying_key(None);
-
-        // Verifying keys must match between pair members
-        assert_eq!(k_verifying.to_bytes(), a_verifying.to_bytes());
-    }
-
-    #[cfg(feature = "divergent")]
-    #[test]
-    fn own_signing_key_differs_in_pair() {
-        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
-
-        let k_signing = key.own_signing_key(None);
-        let a_signing = antikey.own_signing_key(None);
-
-        // Signing keys must not match between pair members
-        assert_ne!(k_signing.to_bytes(), a_signing.to_bytes());
-    }
-
-    #[cfg(feature = "divergent")]
-    #[test]
-    fn own_verifying_key_differs_in_pair() {
-        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
-
-        let k_verifying = key.own_verifying_key(None);
-        let a_verifying = antikey.own_verifying_key(None);
-
-        // Verifying keys must not match between pair members
-        assert_ne!(k_verifying.to_bytes(), a_verifying.to_bytes());
     }
 
     #[test]
