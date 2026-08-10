@@ -86,9 +86,6 @@ impl Solution {
             let k_id_ok = Choice::from((k_candidate[0] <= 0x7F) as u8);
             let a_id_ok = Choice::from((a_candidate[0] >= 0x80) as u8);
 
-            k_candidate.zeroize();
-            a_candidate.zeroize();
-
             // Hash of key XOR antikey should satisfy PoW constraint
             let pow_ok = match Self::check_candidates(
                 &k_candidate,
@@ -106,6 +103,9 @@ impl Solution {
             if bool::from(satisfied) {
                 return (Self::from(k_candidate), Self::from(a_candidate));
             }
+
+            k_candidate.zeroize();
+            a_candidate.zeroize();
 
             nonce += 1;
         }
