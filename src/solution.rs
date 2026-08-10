@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn mine_produces_valid_identities() {
-        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 8);
 
         // Identity bytes must be <= 0x7F for key, >= 0x80 for antikey
         assert!(k_sol.identity <= 0x7F);
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn mine_prevents_commitment_collisions() {
-        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 8);
 
         let magic_diff = KEY_MAGIC.wrapping_sub(ANTIKEY_MAGIC);
         let k_plus = k_sol.commitment.wrapping_add(magic_diff);
@@ -367,7 +367,7 @@ mod tests {
 
     #[test]
     fn mine_produces_matching_constraints() {
-        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 8);
 
         // Constraints must match
         assert_eq!(k_sol.constraint, a_sol.constraint);
@@ -375,18 +375,18 @@ mod tests {
 
     #[test]
     fn verify_succeeds_valid_pair() {
-        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 8);
 
-        // The verification artifact must begin with 16 zero bits
+        // The verification artifact must begin with 8 zero bits
         let result = k_sol.verify(&a_sol);
         assert!(result.is_ok());
         let artifact = result.unwrap();
-        assert_eq!(artifact[0..2], [0u8; 2]);
+        assert_eq!(artifact[0..1], [0u8; 1]);
     }
 
     #[test]
     fn verify_fails_invalid_pair() {
-        let (k_sol, _) = Solution::mine(IKM, IAM, 16);
+        let (k_sol, _) = Solution::mine(IKM, IAM, 8);
 
         // Invalid pair must result in an error
         let result = k_sol.verify(&k_sol);
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn verify_fails_mismatched_constraints() {
-        let (mut k_sol, mut a_sol) = Solution::mine(IKM, IAM, 16);
+        let (mut k_sol, mut a_sol) = Solution::mine(IKM, IAM, 8);
 
         k_sol.constraint = 12;
         a_sol.constraint = 20;
@@ -407,11 +407,11 @@ mod tests {
 
     #[test]
     fn verify_fails_colliding_commitments() {
-        let (mut k_sol, mut a_sol) = Solution::mine(IKM, IAM, 16);
+        let (mut k_sol, mut a_sol) = Solution::mine(IKM, IAM, 8);
 
         a_sol.commitment = k_sol.commitment;
-        k_sol.constraint = 16;
-        a_sol.constraint = 16;
+        k_sol.constraint = 8;
+        a_sol.constraint = 8;
 
         // Colliding commitments must result in an error
         let result = k_sol.verify(&a_sol);
@@ -420,7 +420,7 @@ mod tests {
 
     #[test]
     fn verify_fails_unsatisfied_byte_constraint() {
-        let (mut k_sol, mut a_sol) = Solution::mine(IKM, IAM, 16);
+        let (mut k_sol, mut a_sol) = Solution::mine(IKM, IAM, 8);
 
         k_sol.constraint = 24;
         a_sol.constraint = 24;
@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn verify_fails_unsatisfied_bit_constraint() {
-        let (mut k_sol, mut a_sol) = Solution::mine(IKM, IAM, 16);
+        let (mut k_sol, mut a_sol) = Solution::mine(IKM, IAM, 8);
 
         k_sol.constraint = 20;
         a_sol.constraint = 20;
@@ -444,7 +444,7 @@ mod tests {
 
     #[test]
     fn authenticate_succeeds_correct_ikm() {
-        let (solution, _) = Solution::mine(IKM, IAM, 16);
+        let (solution, _) = Solution::mine(IKM, IAM, 8);
 
         // Authentication with correct keying material must yield Ok result
         let result = solution.authenticate(IKM);
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn authenticate_fails_incorrect_ikm() {
-        let (solution, _) = Solution::mine(IKM, IAM, 16);
+        let (solution, _) = Solution::mine(IKM, IAM, 8);
 
         // Authentication with wrong keying material must result in an error
         let result = solution.authenticate(IAM);
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn to_bytes_produces_32_byte_array() {
-        let (solution, _) = Solution::mine(IKM, IAM, 16);
+        let (solution, _) = Solution::mine(IKM, IAM, 8);
 
         // Solution must be exactly 32 bytes
         let bytes = solution.to_bytes();
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn from_reconstructs_solution() {
-        let (solution, _) = Solution::mine(IKM, IAM, 16);
+        let (solution, _) = Solution::mine(IKM, IAM, 8);
 
         let bytes = solution.to_bytes();
         let reconstructed = Solution::from(bytes);

@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn new_uses_correct_magic_for_key() {
-        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 8);
         let base_point = shared_base(&k_sol, &a_sol);
 
         // Constructor should apply key magic constant
@@ -255,7 +255,7 @@ mod tests {
 
     #[test]
     fn new_uses_correct_magic_for_antikey() {
-        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 8);
         let base_point = shared_base(&k_sol, &a_sol);
 
         // Constructor should apply antikey magic constant
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn new_pair_produces_valid_pair() {
-        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 8);
 
         // Must produce one key and one antikey
         assert!(key.solution.identity <= 0x7F);
@@ -288,19 +288,19 @@ mod tests {
 
     #[test]
     fn verify_succeeds_valid_pair() {
-        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 8);
 
-        // Must return artifact with 16 leading zero bits
+        // Must return artifact with 8 leading zero bits
         let result = key.verify(&antikey);
         assert!(result.is_ok());
         let artifact = result.unwrap();
-        assert_eq!(artifact[0..2], [0u8; 2]);
+        assert_eq!(artifact[0..1], [0u8; 1]);
     }
 
     #[test]
     fn verify_fails_invalid_pair() {
-        let (key_1, _) = AnnihlKey::new_pair(IKM, IAM, 16);
-        let (key_2, _) = AnnihlKey::new_pair(ALT_IKM, ALT_IAM, 16);
+        let (key_1, _) = AnnihlKey::new_pair(IKM, IAM, 8);
+        let (key_2, _) = AnnihlKey::new_pair(ALT_IKM, ALT_IAM, 8);
 
         // Invalid pair must fail verification
         let result = key_1.verify(&key_2);
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn authenticate_succeeds_correct_material() {
-        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 8);
 
         // Authentication with correct keying material must yield Ok result
         let result = key.authenticate(IKM);
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn authenticate_fails_incorrect_material() {
-        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 8);
 
         // Authentication with wrong keying material must result in an error
         let result = key.authenticate(IAM);
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn to_annihilation_succeeds_valid_pair() {
-        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 8);
 
         // Annihilation between valid pair must succeed
         let result = key.to_annihilation(&antikey);
@@ -336,8 +336,8 @@ mod tests {
 
     #[test]
     fn to_annihilation_fails_mismatched_points() {
-        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 16);
-        let (_, antikey) = AnnihlKey::new_pair(ALT_IKM, ALT_IAM, 16);
+        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 8);
+        let (_, antikey) = AnnihlKey::new_pair(ALT_IKM, ALT_IAM, 8);
 
         // Key and antikey from different pairs must result in an error
         let result = key.to_annihilation(&antikey);
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn into_annihilation_consumes_pair() {
-        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (key, antikey) = AnnihlKey::new_pair(IKM, IAM, 8);
 
         // Annihilation between valid pair must succeed
         let result = key.into_annihilation(antikey);
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn to_bytes_produces_64_byte_array() {
-        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 8);
 
         // Key must be exactly 32 bytes
         let bytes = key.to_bytes();
@@ -364,7 +364,7 @@ mod tests {
 
     #[test]
     fn to_edwards_point_decompresses_stored_point() {
-        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 8);
 
         let point = key.to_edwards_point();
         let recompressed = point.compress();
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn try_from_reconstructs_key() {
-        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 8);
 
         let bytes = key.to_bytes();
 
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn try_from_fails_invalid_point() {
-        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 16);
+        let (key, _) = AnnihlKey::new_pair(IKM, IAM, 8);
 
         let mut bytes = key.to_bytes();
         bytes[32] = 0x02;

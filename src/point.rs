@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn shared_base_is_commutative() {
-        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 8);
 
         let base_1 = shared_base(&k_sol, &a_sol);
         let base_2 = shared_base(&a_sol, &k_sol);
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn recover_base_with_key() {
-        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 8);
 
         let shared_base = shared_base(&k_sol, &a_sol);
 
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn recover_base_with_antikey() {
-        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 8);
 
         let shared_base = shared_base(&k_sol, &a_sol);
 
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn verify_pair_succeeds_valid_pair() {
-        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 16);
+        let (k_sol, a_sol) = Solution::mine(IKM, IAM, 8);
         let shared_base = shared_base(&k_sol, &a_sol);
 
         let k_point = derive_point(&k_sol, shared_base);
@@ -179,8 +179,8 @@ mod tests {
 
     #[test]
     fn verify_pair_fails_recovered_bases_mismatch() {
-        let (k_sol, _) = Solution::mine(IKM, IAM, 16);
-        let (_, a_sol) = Solution::mine(ALT_IKM, ALT_IAM, 16);
+        let (k_sol, _) = Solution::mine(IKM, IAM, 8);
+        let (_, a_sol) = Solution::mine(ALT_IKM, ALT_IAM, 8);
 
         let k_base = shared_base(&k_sol, &k_sol);
         let a_base = shared_base(&a_sol, &a_sol);
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn verify_pair_fails_shared_base_mismatch() {
-        let (mut k_sol, mut a_sol) = Solution::mine(IKM, IAM, 16);
+        let (mut k_sol, mut a_sol) = Solution::mine(IKM, IAM, 8);
         let shared_base = shared_base(&k_sol, &a_sol);
 
         let k_point = derive_point(&k_sol, shared_base);
