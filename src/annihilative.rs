@@ -165,11 +165,11 @@ impl AnnihlKey {
     }
 }
 
-impl TryFrom<&[u8; 64]> for AnnihlKey {
+impl TryFrom<[u8; 64]> for AnnihlKey {
     type Error = AnnihlErr;
 
     /// Construct an `AnnihlKey` from a 64 byte array.
-    fn try_from(value: &[u8; 64]) -> Result<Self, Self::Error> {
+    fn try_from(mut value: [u8; 64]) -> Result<Self, Self::Error> {
         let mut solution_bytes = [0u8; 32];
         solution_bytes.copy_from_slice(&value[0..32]);
         let solution = Solution::from(solution_bytes);
@@ -177,6 +177,7 @@ impl TryFrom<&[u8; 64]> for AnnihlKey {
         let mut point_bytes = [0u8; 32];
         point_bytes.copy_from_slice(&value[32..]);
         let mut point = CompressedEdwardsY(point_bytes);
+        value.zeroize();
         point_bytes.zeroize();
 
         match point.decompress() {
@@ -379,7 +380,7 @@ mod tests {
         let bytes = key.to_bytes();
 
         // Reconstructed key must match original
-        let result = AnnihlKey::try_from(&bytes);
+        let result = AnnihlKey::try_from(bytes);
         assert!(result.is_ok());
         let reconstructed = result.unwrap();
         assert_eq!(key, reconstructed);
@@ -395,7 +396,7 @@ mod tests {
         bytes[34..].fill(0x00);
 
         // Reconstruction must fail for invalid curve point
-        let result = AnnihlKey::try_from(&bytes);
+        let result = AnnihlKey::try_from(bytes);
         assert_eq!(result, Err(AnnihlErr::PointDecompress));
     }
 }
