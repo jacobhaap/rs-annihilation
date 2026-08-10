@@ -104,7 +104,7 @@ impl Solution {
 
             let satisfied = k_id_ok & a_id_ok & pow_ok;
             if bool::from(satisfied) {
-                return (Self::from(&k_candidate), Self::from(&a_candidate));
+                return (Self::from(k_candidate), Self::from(a_candidate));
             }
 
             nonce += 1;
@@ -286,9 +286,9 @@ impl Solution {
     }
 }
 
-impl From<&[u8; 32]> for Solution {
+impl From<[u8; 32]> for Solution {
     /// Construct a `Solution` from a 32 byte array.
-    fn from(value: &[u8; 32]) -> Self {
+    fn from(mut value: [u8; 32]) -> Self {
         let mut body = [0u8; 22];
         body.copy_from_slice(&value[9..31]);
 
@@ -297,12 +297,16 @@ impl From<&[u8; 32]> for Solution {
             value[7], value[8],
         ]);
 
-        Self {
+        let solution = Self {
             identity: value[0],
             commitment,
             body,
             constraint: value[31],
-        }
+        };
+
+        value.zeroize();
+
+        solution
     }
 }
 
@@ -472,7 +476,7 @@ mod tests {
         let (solution, _) = Solution::mine(IKM, IAM, 16);
 
         let bytes = solution.to_bytes();
-        let reconstructed = Solution::from(&bytes);
+        let reconstructed = Solution::from(bytes);
 
         // Reconstructed solution must match original
         assert_eq!(solution, reconstructed);

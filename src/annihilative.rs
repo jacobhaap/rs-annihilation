@@ -172,8 +172,7 @@ impl TryFrom<&[u8; 64]> for AnnihlKey {
     fn try_from(value: &[u8; 64]) -> Result<Self, Self::Error> {
         let mut solution_bytes = [0u8; 32];
         solution_bytes.copy_from_slice(&value[0..32]);
-        let solution = Solution::from(&solution_bytes);
-        solution_bytes.zeroize();
+        let solution = Solution::from(solution_bytes);
 
         let mut point_bytes = [0u8; 32];
         point_bytes.copy_from_slice(&value[32..]);
