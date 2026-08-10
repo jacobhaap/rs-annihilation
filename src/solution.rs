@@ -86,13 +86,15 @@ impl Solution {
             let k_id_ok = Choice::from((k_candidate[0] <= 0x7F) as u8);
             let a_id_ok = Choice::from((a_candidate[0] >= 0x80) as u8);
 
-            let key = Self::from(&k_candidate);
-            let antikey = Self::from(&a_candidate);
             k_candidate.zeroize();
             a_candidate.zeroize();
 
             // Hash of key XOR antikey should satisfy PoW constraint
-            let pow_ok = match key.verify(&antikey) {
+            let pow_ok = match Self::check_candidates(
+                &k_candidate,
+                &a_candidate,
+                n as usize,
+            ) {
                 Ok(mut xor_hash) => {
                     xor_hash.zeroize();
                     Choice::from(1u8)
@@ -102,7 +104,7 @@ impl Solution {
 
             let satisfied = k_id_ok & a_id_ok & pow_ok;
             if bool::from(satisfied) {
-                return (key, antikey);
+                return (Self::from(&k_candidate), Self::from(&a_candidate));
             }
 
             nonce += 1;
@@ -127,55 +129,13 @@ impl Solution {
             return Err(AnnihlErr::ConstraintMatch);
         }
 
-        let magic_diff = KEY_MAGIC.wrapping_sub(ANTIKEY_MAGIC);
-        let mut k_plus = key.commitment.wrapping_add(magic_diff);
-
-        // Overflow occurred if result is less than input
-        let k_wrapped = k_plus.ct_lt(&key.commitment);
-
-        // Commitments cannot be equal, antikey commitment cannot equal
-        // key commitment plus magic diff unless wrap occurred
-        let collision = key.commitment.ct_eq(&antikey.commitment)
-            | (antikey.commitment.ct_eq(&k_plus) & !k_wrapped);
-
-        k_plus.zeroize();
-
-        if bool::from(collision) {
-            return Err(AnnihlErr::CommitCollision);
-        }
-
-        let mut pair_xor = [0u8; 32];
         let mut key_bytes = key.to_bytes();
         let mut antikey_bytes = antikey.to_bytes();
-        for i in 0..32 {
-            pair_xor[i] = key_bytes[i] ^ antikey_bytes[i];
-        }
+        let artifact = Self::check_candidates(&key_bytes, &antikey_bytes, n)?;
         key_bytes.zeroize();
         antikey_bytes.zeroize();
 
-        let mut hasher = Sha256::new();
-        hasher.update(pair_xor);
-        let mut xor_hash: [u8; 32] = hasher.finalize().into();
-        pair_xor.zeroize();
-
-        let bytes = n / 8;
-        let bits = n % 8;
-
-        // Verify first N bytes are zero, following N bits are zero
-        let mut satisfied = Choice::from(1u8);
-        for i in 0..bytes {
-            satisfied &= xor_hash[i].ct_eq(&0u8);
-        }
-        if bits > 0 {
-            let mask = (0xFF << (8 - bits)) as u8;
-            satisfied &= (xor_hash[bytes] & mask).ct_eq(&0u8);
-        }
-        if !bool::from(satisfied) {
-            xor_hash.zeroize();
-            return Err(AnnihlErr::UnsatConstraint);
-        }
-
-        Ok(xor_hash)
+        Ok(artifact)
     }
 
     /// Verify that a solution's `body` is authenticated by given keying
@@ -263,6 +223,66 @@ impl Solution {
         body.copy_from_slice(&digest[..22]);
         digest.zeroize();
         body
+    }
+
+    fn check_candidates(
+        key: &[u8; 32],
+        antikey: &[u8; 32],
+        n: usize,
+    ) -> Result<[u8; 32], AnnihlErr> {
+        let k_commit = u64::from_le_bytes([
+            key[1], key[2], key[3], key[4], key[5], key[6], key[7], key[8],
+        ]);
+        let a_commit = u64::from_le_bytes([
+            antikey[1], antikey[2], antikey[3], antikey[4], antikey[5],
+            antikey[6], antikey[7], antikey[8],
+        ]);
+
+        let magic_diff = KEY_MAGIC.wrapping_sub(ANTIKEY_MAGIC);
+        let mut k_plus = k_commit.wrapping_add(magic_diff);
+
+        // Overflow occurred if result is less than input
+        let k_wrapped = k_plus.ct_lt(&k_commit);
+
+        // Commitments cannot be equal, antikey commitment cannot equal
+        // key commitment plus magic diff unless wrap occurred
+        let collision =
+            k_commit.ct_eq(&a_commit) | (a_commit.ct_eq(&k_plus) & !k_wrapped);
+
+        k_plus.zeroize();
+
+        if bool::from(collision) {
+            return Err(AnnihlErr::CommitCollision);
+        }
+
+        let mut pair_xor = [0u8; 32];
+        for i in 0..32 {
+            pair_xor[i] = key[i] ^ antikey[i];
+        }
+
+        let mut hasher = Sha256::new();
+        hasher.update(pair_xor);
+        let mut xor_hash: [u8; 32] = hasher.finalize().into();
+        pair_xor.zeroize();
+
+        let bytes = n / 8;
+        let bits = n % 8;
+
+        // Verify first N bytes are zero, following N bits are zero
+        let mut satisfied = Choice::from(1u8);
+        for i in 0..bytes {
+            satisfied &= xor_hash[i].ct_eq(&0u8);
+        }
+        if bits > 0 {
+            let mask = (0xFF << (8 - bits)) as u8;
+            satisfied &= (xor_hash[bytes] & mask).ct_eq(&0u8);
+        }
+        if !bool::from(satisfied) {
+            xor_hash.zeroize();
+            return Err(AnnihlErr::UnsatConstraint);
+        }
+
+        Ok(xor_hash)
     }
 }
 
