@@ -148,7 +148,7 @@ impl Solution {
     /// Returns an error if the recomputed body does not match the actual body.
     pub fn authenticate(&self, ikm: &[u8]) -> Result<(), AnnihlErr> {
         let is_key = Choice::from((self.identity <= 0x7F) as u8);
-        let domain = u8::conditional_select(&KEY, &ANTIKEY, is_key);
+        let domain = u8::conditional_select(&ANTIKEY, &KEY, is_key);
 
         let mut commitment = self.commitment.to_le_bytes();
         let mut body = Self::authenticate_ikm(
