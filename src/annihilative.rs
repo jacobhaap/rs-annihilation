@@ -6,7 +6,6 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::constants::{ANTIKEY_MAGIC, KEY_MAGIC};
 use crate::errors::AnnihlErr;
-use crate::point::*;
 use crate::solution::{Identity, Solution};
 
 /// An `AnnihlKey` represents the mined proof-of-work solution
