@@ -241,16 +241,14 @@ impl Solution {
         let magic_diff = KEY_MAGIC.wrapping_sub(ANTIKEY_MAGIC);
         let mut k_plus = k_commit.wrapping_add(magic_diff);
 
-        // Overflow occurred if result is less than input
-        let k_wrapped = k_plus.ct_lt(&k_commit);
+        let overflowed = k_plus.ct_lt(&k_commit);
+        let commits_equal = k_commit.ct_eq(&a_commit);
+        let magic_collision = a_commit.ct_eq(&k_plus) & !overflowed;
 
         // Commitments cannot be equal, antikey commitment cannot equal
-        // key commitment plus magic diff unless wrap occurred
-        let collision =
-            k_commit.ct_eq(&a_commit) | (a_commit.ct_eq(&k_plus) & !k_wrapped);
-
+        // key commitment plus magic diff unless an overflow occurred
+        let collision = commits_equal | magic_collision;
         k_plus.zeroize();
-
         if bool::from(collision) {
             return Err(AnnihlErr::CommitCollision);
         }
