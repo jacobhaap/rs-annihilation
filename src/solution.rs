@@ -76,23 +76,23 @@ impl Solution {
         let mut nonce = 0u128;
 
         loop {
-            let mut key_solution = Self::derive_key(ikm, nonce, n, KEY);
-            let mut antikey_solution = Self::derive_key(iam, nonce, n, ANTIKEY);
+            let mut k_candidate = Self::derive_key(ikm, nonce, n, KEY);
+            let mut a_candidate = Self::derive_key(iam, nonce, n, ANTIKEY);
 
-            key_solution[31] = n;
-            antikey_solution[31] = n;
+            k_candidate[31] = n;
+            a_candidate[31] = n;
 
             // 0x7F or below identifies key, 0x80 or above identifies antikey
-            let k_id_ok = Choice::from((key_solution[0] <= 0x7F) as u8);
-            let a_id_ok = Choice::from((antikey_solution[0] >= 0x80) as u8);
+            let k_id_ok = Choice::from((k_candidate[0] <= 0x7F) as u8);
+            let a_id_ok = Choice::from((a_candidate[0] >= 0x80) as u8);
 
-            let key = Self::from(&key_solution);
-            let antikey = Self::from(&antikey_solution);
-            key_solution.zeroize();
-            antikey_solution.zeroize();
+            let key = Self::from(&k_candidate);
+            let antikey = Self::from(&a_candidate);
+            k_candidate.zeroize();
+            a_candidate.zeroize();
 
             // Hash of key XOR antikey should satisfy PoW constraint
-            let satisfied = match key.verify(&antikey) {
+            let pow_ok = match key.verify(&antikey) {
                 Ok(mut xor_hash) => {
                     xor_hash.zeroize();
                     Choice::from(1u8)
@@ -100,8 +100,8 @@ impl Solution {
                 Err(_) => Choice::from(0u8),
             };
 
-            let all_ok = k_id_ok & a_id_ok & satisfied;
-            if bool::from(all_ok) {
+            let satisfied = k_id_ok & a_id_ok & pow_ok;
+            if bool::from(satisfied) {
                 return (key, antikey);
             }
 
