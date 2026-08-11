@@ -1,4 +1,3 @@
-use curve25519_dalek::{EdwardsPoint, edwards::CompressedEdwardsY};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
@@ -6,56 +5,53 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::constants::{ANTIKEY_MAGIC, KEY_MAGIC};
 use crate::errors::AnnihlErr;
-use crate::solution::{Identity, Solution};
+use crate::pow;
 
 /// An `AnnihlKey` represents the mined proof-of-work solution
 /// and elliptic curve point of an annihilative key.
 #[derive(Clone, Debug, Zeroize, ZeroizeOnDrop)]
 pub struct AnnihlKey {
-    /// Serialised proof-of-work solution.
-    pub solution: Solution,
-
-    point: CompressedEdwardsY,
+    inner: [u8; 32],
 }
 
 impl AnnihlKey {
-    /// Construct a new `AnnihlKey` from a mined proof-of-work solution
-    /// and shared base curve point.
-    pub fn new(solution: Solution, base_point: EdwardsPoint) -> Self {
-        let is_key = Choice::from(((solution.identity & 0x80) == 0) as u8);
-        let magic = u64::conditional_select(&ANTIKEY_MAGIC, &KEY_MAGIC, is_key);
-
-        let m_point = from_u64(magic);
-        let mut c_point = from_u64(solution.commitment);
-        let mut offset = m_point + c_point;
-
-        let mut sum = base_point + offset;
-        let point = (sum).compress();
-
-        sum.zeroize();
-        c_point.zeroize();
-        offset.zeroize();
-
-        AnnihlKey { solution, point }
-    }
-
     /// Derive a new annihilative pair from keying material.
     ///
     /// Returns a pair that satisfies the given proof-of-work constraint, where
     /// each `AnnihlKey` consists of the mined [Solution], and an [EdwardsPoint]
     /// at an offset from the pair's shared base curve point.
     pub fn new_pair(ikm: &[u8], iam: &[u8], n: u8) -> (Self, Self) {
-        let pair = Solution::mine(ikm, iam, n);
-        let mut base_point = shared_base(&pair.0, &pair.1);
+        let pair = pow::mine(ikm, iam, n);
 
-        let key = Self::new(pair.0, base_point);
-        let antikey = Self::new(pair.1, base_point);
-
-        base_point.zeroize();
+        let key = Self::from(pair.0);
+        let antikey = Self::from(pair.1);
 
         (key, antikey)
     }
 
+    pub fn identity(&self) -> u8 {
+        self.inner[0]
+    }
+
+    pub fn constraint(&self) -> u8 {
+        self.inner[1]
+    }
+
+    pub fn nonce(&self) -> [u8; 16] {
+        let mut nonce = [0u8; 16];
+        nonce.copy_from_slice(&self.inner[2..18]);
+
+        nonce
+    }
+
+    pub fn body(&self) -> [u8; 14] {
+        let mut body = [0u8; 14];
+        body.copy_from_slice(&self.inner[18..32]);
+
+        body
+    }
+
+    /*
     /// Verify that two annihilative keys form a valid pair.
     ///
     /// First checks that both members share the same base curve point, then
@@ -140,6 +136,7 @@ impl AnnihlKey {
         self.to_annihilation(&other)
     }
 
+
     /// Copy this `AnnihlKey` to a 64 byte array.
     pub fn to_bytes(&self) -> [u8; 64] {
         let mut commitment = self.solution.commitment.to_le_bytes();
@@ -155,42 +152,16 @@ impl AnnihlKey {
 
         bytes
     }
+    */
+}
 
-    /// Return this `AnnihlKey`'s curve point as an [EdwardsPoint].
-    pub fn to_edwards_point(&self) -> EdwardsPoint {
-        self.point
-            .decompress()
-            .expect("point validated during construction")
+impl From<[u8; 32]> for AnnihlKey {
+    fn from(value: [u8; 32]) -> Self {
+        Self { inner: value }
     }
 }
 
-impl TryFrom<[u8; 64]> for AnnihlKey {
-    type Error = AnnihlErr;
-
-    /// Construct an `AnnihlKey` from a 64 byte array.
-    fn try_from(mut value: [u8; 64]) -> Result<Self, Self::Error> {
-        let mut solution_bytes = [0u8; 32];
-        solution_bytes.copy_from_slice(&value[0..32]);
-        let solution = Solution::from(solution_bytes);
-
-        let mut point_bytes = [0u8; 32];
-        point_bytes.copy_from_slice(&value[32..]);
-        let mut point = CompressedEdwardsY(point_bytes);
-        value.zeroize();
-        point_bytes.zeroize();
-
-        match point.decompress() {
-            Some(mut edwards) => edwards.zeroize(),
-            None => {
-                point.zeroize();
-                return Err(AnnihlErr::PointDecompress);
-            }
-        }
-
-        Ok(Self { solution, point })
-    }
-}
-
+/*
 impl PartialEq for AnnihlKey {
     fn eq(&self, other: &Self) -> bool {
         self.ct_eq(other).into()
@@ -219,11 +190,6 @@ impl ConstantTimeEq for AnnihlKey {
     }
 }
 
-impl Identity for AnnihlKey {
-    fn identity_byte(&self) -> u8 {
-        self.solution.identity
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -399,3 +365,4 @@ mod tests {
         assert_eq!(result, Err(AnnihlErr::PointDecompress));
     }
 }
+*/
