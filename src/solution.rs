@@ -55,12 +55,13 @@ pub fn pow_mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
         let mut k_candidate = derive_key(ikm, nonce, n);
         let mut a_candidate = derive_key(iam, nonce, n);
 
-        k_candidate[31] = n;
-        a_candidate[31] = n;
-
         // 0x7F or below identifies key, 0x80 or above identifies antikey
         let k_id_ok = Choice::from((k_candidate[0] <= 0x7F) as u8);
         let a_id_ok = Choice::from((a_candidate[0] >= 0x80) as u8);
+
+        // Store PoW constraint
+        k_candidate[1] = n;
+        a_candidate[1] = n;
 
         // Hash of key XOR antikey should satisfy PoW constraint
         let pow_ok =
@@ -159,7 +160,7 @@ pub fn check_candidates(
 /// Returns an error if the recomputed body does not match the actual body.
 pub fn authenticate(ikm: &[u8], key: [u8; 32]) -> Result<(), AnnihlErr> {
     let mut identity = key[0];
-    let mut n = key[31];
+    let mut n = key[1];
 
     let mut body = authenticate_ikm(ikm, identity, n);
     identity.zeroize();
@@ -183,8 +184,6 @@ fn derive_key(ikm: &[u8], nonce: u128, n: u8) -> [u8; 32] {
     let mut okm: [u8; 32] = hasher.finalize().into();
 
     let identity = okm[0];
-    let commitment = &okm[1..9];
-
     let mut body = authenticate_ikm(ikm, identity, n);
 
     okm[9..31].copy_from_slice(&body);
