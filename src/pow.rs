@@ -62,18 +62,13 @@ pub fn mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
     let mut a_candidate = [0u8; 32];
 
     loop {
-        derive_key(
-            &mut k_candidate,
-            ikm,
-            (nonce.wrapping_add(KEY_MAGIC as u128) ^ mask).to_le_bytes(),
-            n,
-        );
-        derive_key(
-            &mut a_candidate,
-            iam,
-            (nonce.wrapping_add(ANTIKEY_MAGIC as u128) ^ mask).to_le_bytes(),
-            n,
-        );
+        let mut k_nonce = nonce.wrapping_add(KEY_MAGIC as u128) ^ mask;
+        let mut a_nonce = nonce.wrapping_add(ANTIKEY_MAGIC as u128) ^ mask;
+
+        derive_key(&mut k_candidate, ikm, k_nonce.to_le_bytes(), n);
+        derive_key(&mut a_candidate, iam, a_nonce.to_le_bytes(), n);
+        k_nonce.zeroize();
+        a_nonce.zeroize();
 
         // 0x7F or below identifies key, 0x80 or above identifies antikey
         let k_id_ok = Choice::from((k_candidate[0] <= 0x7F) as u8);
@@ -176,10 +171,10 @@ pub fn authenticate(ikm: &[u8], key: [u8; 32]) -> Result<(), AnnihlErr> {
     let mut nonce = [0u8; 16];
     nonce.copy_from_slice(&key[2..18]);
 
-    let mut body = derive_body(ikm, identity, constraint, &nonce);
+    let mut body = [0u8; 32];
+    derive_key(&mut body, ikm, nonce, constraint);
     identity.zeroize();
     constraint.zeroize();
-    nonce.zeroize();
 
     let matches: bool = body.ct_eq(&key[18..32]).into();
     body.zeroize();
@@ -191,42 +186,23 @@ pub fn authenticate(ikm: &[u8], key: [u8; 32]) -> Result<(), AnnihlErr> {
     }
 }
 
-fn derive_key(dst: &mut [u8; 32], ikm: &[u8], nonce: [u8; 16], constraint: u8) {
-    let mut hasher = Sha256::new();
-    hasher.update(ikm);
-    hasher.update(nonce);
-    hasher.update([constraint]);
-    let mut okm: [u8; 32] = hasher.finalize().into();
-
-    let identity = okm[0];
-    dst[0] = identity;
-    dst[1] = constraint;
-    dst[2..18].copy_from_slice(&nonce);
-
-    let mut body = derive_body(ikm, identity, constraint, &nonce);
-    dst[18..32].copy_from_slice(&body);
-    nonce.zeroize();
-
-    body.zeroize();
-}
-
-fn derive_body(
+fn derive_key(
+    dst: &mut [u8; 32],
     ikm: &[u8],
-    identity: u8,
+    mut nonce: [u8; 16],
     constraint: u8,
-    nonce: &[u8; 16],
-) -> [u8; 14] {
+) {
     let mut mac = Hmac::<Sha256>::new_from_slice(ikm)
         .expect("HMAC can take key of any size");
-    mac.update(&[identity]);
     mac.update(&[constraint]);
-    mac.update(nonce);
+    mac.update(&nonce);
     let mut digest: [u8; 32] = mac.finalize().into_bytes().into();
-
-    let mut body = [0u8; 14];
-    body.copy_from_slice(&digest[..14]);
+    dst.copy_from_slice(&digest);
     digest.zeroize();
-    body
+
+    dst[1] = constraint;
+    dst[2..18].copy_from_slice(&nonce);
+    nonce.zeroize();
 }
 
 fn check_nonce(k: u128, a: u128) -> bool {
