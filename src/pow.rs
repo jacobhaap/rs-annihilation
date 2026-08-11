@@ -1,4 +1,6 @@
 use hmac::{Hmac, Mac};
+use rand::TryRng;
+use rand::rngs::SysRng;
 use sha2::{Digest, Sha256};
 use subtle::{Choice, ConstantTimeEq};
 use zeroize::Zeroize;
@@ -49,6 +51,12 @@ pub(crate) trait Identity {
 ///
 /// Each solution's body is authenticated by its keying material.
 pub fn mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
+    let mut dst = [0u8; 16];
+    SysRng.try_fill_bytes(&mut dst).unwrap(); // Temporary unwrap
+
+    let mask = u128::from_le_bytes(dst);
+    dst.zeroize();
+
     let mut nonce = 0u128;
     let mut k_candidate = [0u8; 32];
     let mut a_candidate = [0u8; 32];
@@ -57,13 +65,13 @@ pub fn mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
         derive_key(
             &mut k_candidate,
             ikm,
-            nonce.wrapping_add(KEY_MAGIC as u128),
+            (nonce.wrapping_add(KEY_MAGIC as u128) ^ mask).to_le_bytes(),
             n,
         );
         derive_key(
             &mut a_candidate,
             iam,
-            nonce.wrapping_add(ANTIKEY_MAGIC as u128),
+            (nonce.wrapping_add(ANTIKEY_MAGIC as u128) ^ mask).to_le_bytes(),
             n,
         );
 
@@ -103,6 +111,24 @@ pub fn check(
     let n = key[1] as usize;
     if !bool::from(key[1].ct_eq(&antikey[1])) {
         return Err(AnnihlErr::ConstraintMatch);
+    }
+
+    let mut k_nonce = [0u8; 16];
+    k_nonce.copy_from_slice(&key[2..18]);
+    let mut a_nonce = [0u8; 16];
+    a_nonce.copy_from_slice(&antikey[2..18]);
+
+    let mut k = u128::from_le_bytes(k_nonce);
+    let mut a = u128::from_le_bytes(a_nonce);
+    k_nonce.zeroize();
+    a_nonce.zeroize();
+
+    let shared_nonce = check_nonce(k, a);
+    k.zeroize();
+    a.zeroize();
+
+    if !shared_nonce {
+        return Err(AnnihlErr::CommitCollision); // Placeholder, repalce with counter mismatch variant
     }
 
     let mut pair_xor = [0u8; 32];
@@ -165,22 +191,21 @@ pub fn authenticate(ikm: &[u8], key: [u8; 32]) -> Result<(), AnnihlErr> {
     }
 }
 
-fn derive_key(dst: &mut [u8; 32], ikm: &[u8], nonce: u128, constraint: u8) {
-    let mut nonce_bytes = nonce.to_le_bytes();
-
+fn derive_key(dst: &mut [u8; 32], ikm: &[u8], nonce: [u8; 16], constraint: u8) {
     let mut hasher = Sha256::new();
     hasher.update(ikm);
-    hasher.update(&nonce_bytes);
+    hasher.update(nonce);
     hasher.update([constraint]);
     let mut okm: [u8; 32] = hasher.finalize().into();
 
     let identity = okm[0];
     dst[0] = identity;
     dst[1] = constraint;
-    dst[2..18].copy_from_slice(&nonce_bytes);
+    dst[2..18].copy_from_slice(&nonce);
 
-    let mut body = derive_body(ikm, identity, constraint, &nonce_bytes);
+    let mut body = derive_body(ikm, identity, constraint, &nonce);
     dst[18..32].copy_from_slice(&body);
+    nonce.zeroize();
 
     body.zeroize();
 }
@@ -202,6 +227,55 @@ fn derive_body(
     body.copy_from_slice(&digest[..14]);
     digest.zeroize();
     body
+}
+
+fn check_nonce(k: u128, a: u128) -> bool {
+    let nonce_xor = k ^ a;
+
+    // Reachable carry states, encoded as a bitmask over 4 possible
+    // states (00, 01, 10, 11). Starts at state 00 (no carry).
+    let mut reachable: u8 = 0b0001;
+
+    for i in 0..128u32 {
+        // Short names to abbreivate bits for the XOR and magic constants
+        // at given positions.
+        let nxb = ((nonce_xor >> i) & 1) as u8;
+        let kmb = ((KEY_MAGIC as u128 >> i) & 1) as u8;
+        let amb = ((ANTIKEY_MAGIC as u128 >> i) & 1) as u8;
+
+        let mut next: u8 = 0;
+        for state in 0..4u8 {
+            if reachable & (1 << state) == 0 {
+                continue;
+            }
+            let k_carry = (state >> 1) & 1;
+            let a_carry = state & 1;
+
+            // Try both values of the shared nonce bit at this position
+            for nb in 0..2u8 {
+                let k_sum_bit = nb ^ kmb ^ k_carry;
+                let a_sum_bit = nb ^ amb ^ a_carry;
+                if (k_sum_bit ^ a_sum_bit) != nxb {
+                    continue;
+                }
+
+                // Full-adder carry-out, computed for each side
+                let k_out = (nb & kmb) | (kmb & k_carry) | (nb & k_carry);
+                let a_out = (nb & amb) | (amb & a_carry) | (nb & a_carry);
+                let new_state = (k_out << 1) | a_out;
+                next |= 1 << new_state;
+            }
+        }
+
+        // No carry state survived
+        // No shared nonce value could produce the given pair.
+        reachable = next;
+        if reachable == 0 {
+            return false;
+        }
+    }
+
+    reachable != 0
 }
 
 /*
