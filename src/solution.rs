@@ -71,10 +71,6 @@ pub fn pow_mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
         let k_id_ok = Choice::from((k_candidate[0] <= 0x7F) as u8);
         let a_id_ok = Choice::from((a_candidate[0] >= 0x80) as u8);
 
-        // Store PoW constraint
-        k_candidate[1] = n;
-        a_candidate[1] = n;
-
         // Hash of key XOR antikey should satisfy PoW constraint
         let pow_ok = match check_candidates(&k_candidate, &a_candidate) {
             Ok(mut xor_hash) => {
@@ -107,12 +103,6 @@ pub fn check_candidates(
     let n = key[1] as usize;
     if !bool::from(key[1].ct_eq(&antikey[1])) {
         return Err(AnnihlErr::ConstraintMatch);
-    }
-
-    // Key and antikey bodies cannot be equal
-    let collision = key[2..32].ct_eq(&antikey[2..32]);
-    if bool::from(collision) {
-        return Err(AnnihlErr::CommitCollision); // Replace with new error variant
     }
 
     let mut pair_xor = [0u8; 32];
@@ -155,13 +145,17 @@ pub fn check_candidates(
 /// Returns an error if the recomputed body does not match the actual body.
 pub fn authenticate(ikm: &[u8], key: [u8; 32]) -> Result<(), AnnihlErr> {
     let mut identity = key[0];
-    let mut n = key[1];
+    let mut constraint = key[1];
 
-    let mut body = authenticate_ikm(ikm, identity, n);
+    let mut nonce = [0u8; 16];
+    nonce.copy_from_slice(&key[2..18]);
+
+    let mut body = authenticate_ikm(ikm, identity, constraint, &nonce);
     identity.zeroize();
-    n.zeroize();
+    constraint.zeroize();
+    nonce.zeroize();
 
-    let matches: bool = body.ct_eq(&key[2..32]).into();
+    let matches: bool = body.ct_eq(&key[18..32]).into();
     body.zeroize();
 
     if matches {
@@ -171,29 +165,41 @@ pub fn authenticate(ikm: &[u8], key: [u8; 32]) -> Result<(), AnnihlErr> {
     }
 }
 
-fn derive_key(dst: &mut [u8; 32], ikm: &[u8], nonce: u128, n: u8) {
+fn derive_key(dst: &mut [u8; 32], ikm: &[u8], nonce: u128, constraint: u8) {
+    let mut nonce_bytes = nonce.to_le_bytes();
+
     let mut hasher = Sha256::new();
     hasher.update(ikm);
-    hasher.update(nonce.to_le_bytes());
-    hasher.update([n]);
+    hasher.update(&nonce_bytes);
+    hasher.update([constraint]);
     let mut okm: [u8; 32] = hasher.finalize().into();
 
     let identity = okm[0];
-    let mut body = authenticate_ikm(ikm, identity, n);
+    dst[0] = identity;
+    dst[1] = constraint;
+    dst[2..18].copy_from_slice(&nonce_bytes);
 
-    dst[1..32].copy_from_slice(&body);
+    let mut body = authenticate_ikm(ikm, identity, constraint, &nonce_bytes);
+    dst[18..32].copy_from_slice(&body);
+
     body.zeroize();
 }
 
-fn authenticate_ikm(ikm: &[u8], identity: u8, n: u8) -> [u8; 30] {
+fn authenticate_ikm(
+    ikm: &[u8],
+    identity: u8,
+    constraint: u8,
+    nonce: &[u8; 16],
+) -> [u8; 14] {
     let mut mac = Hmac::<Sha256>::new_from_slice(ikm)
         .expect("HMAC can take key of any size");
     mac.update(&[identity]);
-    mac.update(&[n]);
+    mac.update(&[constraint]);
+    mac.update(nonce);
     let mut digest: [u8; 32] = mac.finalize().into_bytes().into();
 
-    let mut body = [0u8; 30];
-    body.copy_from_slice(&digest[..30]);
+    let mut body = [0u8; 14];
+    body.copy_from_slice(&digest[..14]);
     digest.zeroize();
     body
 }
