@@ -1,13 +1,12 @@
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
-use subtle::{
-    Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeLess,
-};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use subtle::{Choice, ConstantTimeEq, ConstantTimeLess};
+use zeroize::Zeroize;
 
 use crate::constants::{ANTIKEY_MAGIC, KEY_MAGIC};
 use crate::errors::AnnihlErr;
 
+/*
 /// Domain separation byte for keys.
 const KEY: u8 = 0x4B;
 
@@ -39,59 +38,33 @@ pub(crate) trait Identity {
         }
     }
 }
+    */
 
-/// A `Solution` represents the serialised proof-of-work solution of an
-/// annihilative key.
-#[derive(Clone, Debug, Zeroize, ZeroizeOnDrop)]
-pub struct Solution {
-    /// Identifies whether the solution represents a key or antikey.
-    ///
-    /// Values of `0x7F` or below identify key solutions, and values of
-    /// `0x80` or above identify antikey solutions.
-    pub identity: u8,
+/// Mine for a pair of solutions that satisfy the given proof-of-work
+/// constraint.
+///
+/// Repeatedly derives candidates from the keying material with incremental
+/// nonce values until finding a pair where the [Sha256] hash of their XOR
+/// begins with a number of leading zero bits to satisfy the constraint.
+///
+/// Each solution's body is authenticated by its keying material.
+pub fn pow_mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
+    let mut nonce = 0u128;
 
-    /// Cryptographic commitment used for binding the solution to its keying
-    /// material, and as a pseudorandom value for deriving a curve point
-    /// offset.
-    pub commitment: u64,
+    loop {
+        let mut k_candidate = derive_key(ikm, nonce, n);
+        let mut a_candidate = derive_key(iam, nonce, n);
 
-    /// HMAC digest authenticating the solution's identity, commitment, and
-    /// constraint against its keying material.
-    pub body: [u8; 22],
+        k_candidate[31] = n;
+        a_candidate[31] = n;
 
-    /// Proof-of-Work constraint, as a number of leading zero bits.
-    pub constraint: u8,
-}
+        // 0x7F or below identifies key, 0x80 or above identifies antikey
+        let k_id_ok = Choice::from((k_candidate[0] <= 0x7F) as u8);
+        let a_id_ok = Choice::from((a_candidate[0] >= 0x80) as u8);
 
-impl Solution {
-    /// Mine for a pair of solutions that satisfy the given proof-of-work
-    /// constraint.
-    ///
-    /// Repeatedly derives candidates from the keying material with incremental
-    /// nonce values until finding a pair where the [Sha256] hash of their XOR
-    /// begins with a number of leading zero bits to satisfy the constraint.
-    ///
-    /// Each solution's body is authenticated by its keying material.
-    pub fn mine(ikm: &[u8], iam: &[u8], n: u8) -> (Solution, Solution) {
-        let mut nonce = 0u128;
-
-        loop {
-            let mut k_candidate = Self::derive_key(ikm, nonce, n, KEY);
-            let mut a_candidate = Self::derive_key(iam, nonce, n, ANTIKEY);
-
-            k_candidate[31] = n;
-            a_candidate[31] = n;
-
-            // 0x7F or below identifies key, 0x80 or above identifies antikey
-            let k_id_ok = Choice::from((k_candidate[0] <= 0x7F) as u8);
-            let a_id_ok = Choice::from((a_candidate[0] >= 0x80) as u8);
-
-            // Hash of key XOR antikey should satisfy PoW constraint
-            let pow_ok = match Self::check_candidates(
-                &k_candidate,
-                &a_candidate,
-                n as usize,
-            ) {
+        // Hash of key XOR antikey should satisfy PoW constraint
+        let pow_ok =
+            match check_candidates(&k_candidate, &a_candidate, n as usize) {
                 Ok(mut xor_hash) => {
                     xor_hash.zeroize();
                     Choice::from(1u8)
@@ -99,243 +72,140 @@ impl Solution {
                 Err(_) => Choice::from(0u8),
             };
 
-            let satisfied = k_id_ok & a_id_ok & pow_ok;
-            if bool::from(satisfied) {
-                return (Self::from(k_candidate), Self::from(a_candidate));
-            }
-
-            k_candidate.zeroize();
-            a_candidate.zeroize();
-
-            nonce += 1;
-        }
-    }
-
-    /// Verify that a pair of solutions satisfy their proof-of-work constraint.
-    ///
-    /// Computes the XOR of both solutions, and verifies that its hash begins
-    /// with the required number of zero bits.
-    ///
-    /// Returns the hash as an artifact on success, or an error when a
-    /// constraint mismatch or unsatisfied constraint is encountered.
-    pub fn verify(&self, other: &Solution) -> Result<[u8; 32], AnnihlErr> {
-        let (key, antikey) = match Self::validate_pair(self, other) {
-            Ok(pair) => pair,
-            Err(e) => return Err(e),
-        };
-
-        let n = key.constraint as usize;
-        if !bool::from(key.constraint.ct_eq(&antikey.constraint)) {
-            return Err(AnnihlErr::ConstraintMatch);
+        let satisfied = k_id_ok & a_id_ok & pow_ok;
+        if bool::from(satisfied) {
+            return (k_candidate, a_candidate);
         }
 
-        let mut key_bytes = key.to_bytes();
-        let mut antikey_bytes = antikey.to_bytes();
-        let artifact = Self::check_candidates(&key_bytes, &antikey_bytes, n)?;
-        key_bytes.zeroize();
-        antikey_bytes.zeroize();
+        k_candidate.zeroize();
+        a_candidate.zeroize();
 
-        Ok(artifact)
-    }
-
-    /// Verify that a solution's `body` is authenticated by given keying
-    /// material.
-    ///
-    /// Recomputes the expected body from the solution's identity, commitment,
-    /// and constraint, along with the given keying material, then verifies it
-    /// matches the actual body.
-    ///
-    /// Returns an error if the recomputed body does not match the actual body.
-    pub fn authenticate(&self, ikm: &[u8]) -> Result<(), AnnihlErr> {
-        let is_key = Choice::from((self.identity <= 0x7F) as u8);
-        let domain = u8::conditional_select(&ANTIKEY, &KEY, is_key);
-
-        let mut commitment = self.commitment.to_le_bytes();
-        let mut body = Self::authenticate_ikm(
-            ikm,
-            self.identity,
-            &commitment,
-            self.constraint,
-            domain,
-        );
-        commitment.zeroize();
-
-        let matches: bool = body.ct_eq(&self.body).into();
-        body.zeroize();
-
-        if matches {
-            Ok(())
-        } else {
-            Err(AnnihlErr::UnauthBody)
-        }
-    }
-
-    /// Copy this `Solution` to a 32 byte array.
-    pub fn to_bytes(&self) -> [u8; 32] {
-        let mut commitment = self.commitment.to_le_bytes();
-
-        let mut bytes = [0u8; 32];
-        bytes[0] = self.identity;
-        bytes[1..9].copy_from_slice(&commitment);
-        bytes[9..31].copy_from_slice(&self.body);
-        bytes[31] = self.constraint;
-
-        commitment.zeroize();
-
-        bytes
-    }
-
-    fn derive_key(ikm: &[u8], nonce: u128, n: u8, domain: u8) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update([domain]);
-        hasher.update(ikm);
-        hasher.update(nonce.to_le_bytes());
-        hasher.update([n]);
-        let mut okm: [u8; 32] = hasher.finalize().into();
-
-        let identity = okm[0];
-        let commitment = &okm[1..9];
-
-        let mut body =
-            Self::authenticate_ikm(ikm, identity, commitment, n, domain);
-
-        okm[9..31].copy_from_slice(&body);
-        body.zeroize();
-        okm
-    }
-
-    fn authenticate_ikm(
-        ikm: &[u8],
-        identity: u8,
-        commitment: &[u8],
-        n: u8,
-        domain: u8,
-    ) -> [u8; 22] {
-        let mut mac = Hmac::<Sha256>::new_from_slice(ikm)
-            .expect("HMAC can take key of any size");
-        mac.update(&[domain]);
-        mac.update(&[identity]);
-        mac.update(commitment);
-        mac.update(&[n]);
-        let mut digest: [u8; 32] = mac.finalize().into_bytes().into();
-
-        let mut body = [0u8; 22];
-        body.copy_from_slice(&digest[..22]);
-        digest.zeroize();
-        body
-    }
-
-    fn check_candidates(
-        key: &[u8; 32],
-        antikey: &[u8; 32],
-        n: usize,
-    ) -> Result<[u8; 32], AnnihlErr> {
-        let k_commit = u64::from_le_bytes([
-            key[1], key[2], key[3], key[4], key[5], key[6], key[7], key[8],
-        ]);
-        let a_commit = u64::from_le_bytes([
-            antikey[1], antikey[2], antikey[3], antikey[4], antikey[5],
-            antikey[6], antikey[7], antikey[8],
-        ]);
-
-        let magic_diff = KEY_MAGIC.wrapping_sub(ANTIKEY_MAGIC);
-        let mut k_plus = k_commit.wrapping_add(magic_diff);
-
-        let overflowed = k_plus.ct_lt(&k_commit);
-        let commits_equal = k_commit.ct_eq(&a_commit);
-        let magic_collision = a_commit.ct_eq(&k_plus) & !overflowed;
-
-        // Commitments cannot be equal, antikey commitment cannot equal
-        // key commitment plus magic diff unless an overflow occurred
-        let collision = commits_equal | magic_collision;
-        k_plus.zeroize();
-        if bool::from(collision) {
-            return Err(AnnihlErr::CommitCollision);
-        }
-
-        let mut pair_xor = [0u8; 32];
-        for i in 0..32 {
-            pair_xor[i] = key[i] ^ antikey[i];
-        }
-
-        let mut hasher = Sha256::new();
-        hasher.update(pair_xor);
-        let mut xor_hash: [u8; 32] = hasher.finalize().into();
-        pair_xor.zeroize();
-
-        let bytes = n / 8;
-        let bits = n % 8;
-
-        // Verify first N bytes are zero, following N bits are zero
-        let mut satisfied = Choice::from(1u8);
-        for i in 0..bytes {
-            satisfied &= xor_hash[i].ct_eq(&0u8);
-        }
-        if bits > 0 {
-            let mask = (0xFF << (8 - bits)) as u8;
-            satisfied &= (xor_hash[bytes] & mask).ct_eq(&0u8);
-        }
-        if !bool::from(satisfied) {
-            xor_hash.zeroize();
-            return Err(AnnihlErr::UnsatConstraint);
-        }
-
-        Ok(xor_hash)
+        nonce += 1;
     }
 }
 
-impl From<[u8; 32]> for Solution {
-    /// Construct a `Solution` from a 32 byte array.
-    fn from(mut value: [u8; 32]) -> Self {
-        let mut body = [0u8; 22];
-        body.copy_from_slice(&value[9..31]);
+/// Verify that a pair of solutions satisfy their proof-of-work constraint.
+///
+/// Computes the XOR of both solutions, and verifies that its hash begins
+/// with the required number of zero bits.
+///
+/// Returns the hash as an artifact on success, or an error when a
+/// constraint mismatch or unsatisfied constraint is encountered.
+pub fn check_candidates(
+    key: &[u8; 32],
+    antikey: &[u8; 32],
+    n: usize,
+) -> Result<[u8; 32], AnnihlErr> {
+    let k_commit = u64::from_le_bytes([
+        key[1], key[2], key[3], key[4], key[5], key[6], key[7], key[8],
+    ]);
+    let a_commit = u64::from_le_bytes([
+        antikey[1], antikey[2], antikey[3], antikey[4], antikey[5], antikey[6],
+        antikey[7], antikey[8],
+    ]);
 
-        let commitment = u64::from_le_bytes([
-            value[1], value[2], value[3], value[4], value[5], value[6],
-            value[7], value[8],
-        ]);
+    let magic_diff = KEY_MAGIC.wrapping_sub(ANTIKEY_MAGIC);
+    let mut k_plus = k_commit.wrapping_add(magic_diff);
 
-        let solution = Self {
-            identity: value[0],
-            commitment,
-            body,
-            constraint: value[31],
-        };
+    let overflowed = k_plus.ct_lt(&k_commit);
+    let commits_equal = k_commit.ct_eq(&a_commit);
+    let magic_collision = a_commit.ct_eq(&k_plus) & !overflowed;
 
-        value.zeroize();
+    // Commitments cannot be equal, antikey commitment cannot equal
+    // key commitment plus magic diff unless an overflow occurred
+    let collision = commits_equal | magic_collision;
+    k_plus.zeroize();
+    if bool::from(collision) {
+        return Err(AnnihlErr::CommitCollision);
+    }
 
-        solution
+    let mut pair_xor = [0u8; 32];
+    for i in 0..32 {
+        pair_xor[i] = key[i] ^ antikey[i];
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(pair_xor);
+    let mut artifact: [u8; 32] = hasher.finalize().into();
+    pair_xor.zeroize();
+
+    let bytes = n / 8;
+    let bits = n % 8;
+
+    // Verify first N bytes are zero, following N bits are zero
+    let mut satisfied = Choice::from(1u8);
+    for i in 0..bytes {
+        satisfied &= artifact[i].ct_eq(&0u8);
+    }
+    if bits > 0 {
+        let mask = (0xFF << (8 - bits)) as u8;
+        satisfied &= (artifact[bytes] & mask).ct_eq(&0u8);
+    }
+    if !bool::from(satisfied) {
+        artifact.zeroize();
+        return Err(AnnihlErr::UnsatConstraint);
+    }
+
+    Ok(artifact)
+}
+
+/// Verify that a solution's `body` is authenticated by given keying
+/// material.
+///
+/// Recomputes the expected body from the solution's identity, commitment,
+/// and constraint, along with the given keying material, then verifies it
+/// matches the actual body.
+///
+/// Returns an error if the recomputed body does not match the actual body.
+pub fn authenticate(ikm: &[u8], key: [u8; 32]) -> Result<(), AnnihlErr> {
+    let mut identity = key[0];
+    let mut n = key[31];
+
+    let mut body = authenticate_ikm(ikm, identity, n);
+    identity.zeroize();
+    n.zeroize();
+
+    let matches: bool = body.ct_eq(&key[1..30]).into();
+    body.zeroize();
+
+    if matches {
+        Ok(())
+    } else {
+        Err(AnnihlErr::UnauthBody)
     }
 }
 
-impl PartialEq for Solution {
-    fn eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).into()
-    }
+fn derive_key(ikm: &[u8], nonce: u128, n: u8) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(ikm);
+    hasher.update(nonce.to_le_bytes());
+    hasher.update([n]);
+    let mut okm: [u8; 32] = hasher.finalize().into();
+
+    let identity = okm[0];
+    let commitment = &okm[1..9];
+
+    let mut body = authenticate_ikm(ikm, identity, n);
+
+    okm[9..31].copy_from_slice(&body);
+    body.zeroize();
+    okm
 }
 
-impl Eq for Solution {}
+fn authenticate_ikm(ikm: &[u8], identity: u8, n: u8) -> [u8; 22] {
+    let mut mac = Hmac::<Sha256>::new_from_slice(ikm)
+        .expect("HMAC can take key of any size");
+    mac.update(&[identity]);
+    mac.update(&[n]);
+    let mut digest: [u8; 32] = mac.finalize().into_bytes().into();
 
-impl ConstantTimeEq for Solution {
-    fn ct_eq(&self, other: &Self) -> Choice {
-        let mut self_bytes = self.to_bytes();
-        let mut other_bytes = other.to_bytes();
-
-        let result = self_bytes.ct_eq(&other_bytes);
-
-        self_bytes.zeroize();
-        other_bytes.zeroize();
-
-        result
-    }
+    let mut body = [0u8; 22];
+    body.copy_from_slice(&digest[..22]);
+    digest.zeroize();
+    body
 }
 
-impl Identity for Solution {
-    fn identity_byte(&self) -> u8 {
-        self.identity
-    }
-}
-
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,3 +350,4 @@ mod tests {
         assert_eq!(solution, reconstructed);
     }
 }
+*/
