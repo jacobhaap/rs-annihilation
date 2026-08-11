@@ -29,6 +29,33 @@ impl AnnihlKey {
         (key, antikey)
     }
 
+    /// Verify that two annihilative keys form a valid pair.
+    ///
+    /// First checks that both members share the same base curve point, then
+    /// checks if the hash of their XOR satisfies the proof-of-work constraint.
+    ///
+    /// Returns the XOR hash as an artifact on success, or an error when the
+    /// members do not form a valid annihilative pair.
+    pub fn verify(&self, other: &Self) -> Result<[u8; 32], AnnihlErr> {
+        let (key, antikey) = match Self::validate_pair(self, other) {
+            Ok(pair) => pair,
+            Err(e) => return Err(e),
+        };
+
+        pow::check(key.as_bytes(), antikey.as_bytes())
+    }
+
+    /// Authenticate than an `AnnihlKey` was derived from given keying material.
+    ///
+    /// Returns an error if the annihilative key could not be authenticated by
+    /// the keying material.
+    pub fn authenticate(
+        &self,
+        keying_material: &[u8],
+    ) -> Result<(), AnnihlErr> {
+        pow::authenticate(keying_material, self.as_bytes())
+    }
+
     pub fn identity(&self) -> u8 {
         self.inner[0]
     }
@@ -51,43 +78,31 @@ impl AnnihlKey {
         body
     }
 
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.inner
+    }
+
+    fn validate_pair<'a>(
+        &'a self,
+        other: &'a Self,
+    ) -> Result<(&'a Self, &'a Self), AnnihlErr> {
+        let self_is_key = Choice::from(((self.identity() & 0x80) == 0) as u8);
+        let other_is_key = Choice::from(((other.identity() & 0x80) == 0) as u8);
+
+        // Cannot be two keys or two antikeys
+        if !bool::from(self_is_key ^ other_is_key) {
+            return Err(AnnihlErr::InvalidPair);
+        }
+
+        // Return the valid key and antikey tuple
+        if bool::from(self_is_key) {
+            Ok((self, other))
+        } else {
+            Ok((other, self))
+        }
+    }
+
     /*
-    /// Verify that two annihilative keys form a valid pair.
-    ///
-    /// First checks that both members share the same base curve point, then
-    /// checks if the hash of their XOR satisfies the proof-of-work constraint.
-    ///
-    /// Returns the XOR hash as an artifact on success, or an error when the
-    /// members do not form a valid annihilative pair.
-    pub fn verify(&self, other: &Self) -> Result<[u8; 32], AnnihlErr> {
-        let (key, antikey) = match Self::validate_pair(self, other) {
-            Ok(pair) => pair,
-            Err(e) => return Err(e),
-        };
-
-        // Shared base between curve points should match
-        verify_pair(
-            &key.solution,
-            key.to_edwards_point(),
-            &antikey.solution,
-            antikey.to_edwards_point(),
-        )?;
-
-        // Hash of key XOR antikey must satisfy the PoW constraint
-        key.solution.verify(&antikey.solution)
-    }
-
-    /// Authenticate than an `AnnihlKey` was derived from given keying material.
-    ///
-    /// Returns an error if the annihilative key could not be authenticated by
-    /// the keying material.
-    pub fn authenticate(
-        &self,
-        keying_material: &[u8],
-    ) -> Result<(), AnnihlErr> {
-        self.solution.authenticate(keying_material)
-    }
-
     /// Compute an annihilation key from an annihilative pair.
     ///
     /// Verifies the pair, then computes an [Hmac] of the verification artifact,

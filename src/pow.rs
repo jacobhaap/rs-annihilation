@@ -164,7 +164,7 @@ pub fn check(
 /// matches the actual body.
 ///
 /// Returns an error if the recomputed body does not match the actual body.
-pub fn authenticate(ikm: &[u8], key: [u8; 32]) -> Result<(), AnnihlErr> {
+pub fn authenticate(ikm: &[u8], key: &[u8; 32]) -> Result<(), AnnihlErr> {
     let mut identity = key[0];
     let mut constraint = key[1];
 
