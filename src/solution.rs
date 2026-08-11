@@ -54,8 +54,18 @@ pub fn pow_mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
     let mut a_candidate = [0u8; 32];
 
     loop {
-        derive_key(&mut k_candidate, ikm, nonce, n);
-        derive_key(&mut a_candidate, iam, nonce, n);
+        derive_key(
+            &mut k_candidate,
+            ikm,
+            nonce.wrapping_add(KEY_MAGIC as u128),
+            n,
+        );
+        derive_key(
+            &mut a_candidate,
+            iam,
+            nonce.wrapping_add(ANTIKEY_MAGIC as u128),
+            n,
+        );
 
         // 0x7F or below identifies key, 0x80 or above identifies antikey
         let k_id_ok = Choice::from((k_candidate[0] <= 0x7F) as u8);
