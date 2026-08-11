@@ -48,7 +48,7 @@ pub(crate) trait Identity {
 /// begins with a number of leading zero bits to satisfy the constraint.
 ///
 /// Each solution's body is authenticated by its keying material.
-pub fn pow_mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
+pub fn mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
     let mut nonce = 0u128;
     let mut k_candidate = [0u8; 32];
     let mut a_candidate = [0u8; 32];
@@ -72,7 +72,7 @@ pub fn pow_mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
         let a_id_ok = Choice::from((a_candidate[0] >= 0x80) as u8);
 
         // Hash of key XOR antikey should satisfy PoW constraint
-        let pow_ok = match check_candidates(&k_candidate, &a_candidate) {
+        let pow_ok = match check(&k_candidate, &a_candidate) {
             Ok(mut xor_hash) => {
                 xor_hash.zeroize();
                 Choice::from(1u8)
@@ -96,7 +96,7 @@ pub fn pow_mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
 ///
 /// Returns the hash as an artifact on success, or an error when a
 /// constraint mismatch or unsatisfied constraint is encountered.
-pub fn check_candidates(
+pub fn check(
     key: &[u8; 32],
     antikey: &[u8; 32],
 ) -> Result<[u8; 32], AnnihlErr> {
@@ -150,7 +150,7 @@ pub fn authenticate(ikm: &[u8], key: [u8; 32]) -> Result<(), AnnihlErr> {
     let mut nonce = [0u8; 16];
     nonce.copy_from_slice(&key[2..18]);
 
-    let mut body = authenticate_ikm(ikm, identity, constraint, &nonce);
+    let mut body = derive_body(ikm, identity, constraint, &nonce);
     identity.zeroize();
     constraint.zeroize();
     nonce.zeroize();
@@ -179,13 +179,13 @@ fn derive_key(dst: &mut [u8; 32], ikm: &[u8], nonce: u128, constraint: u8) {
     dst[1] = constraint;
     dst[2..18].copy_from_slice(&nonce_bytes);
 
-    let mut body = authenticate_ikm(ikm, identity, constraint, &nonce_bytes);
+    let mut body = derive_body(ikm, identity, constraint, &nonce_bytes);
     dst[18..32].copy_from_slice(&body);
 
     body.zeroize();
 }
 
-fn authenticate_ikm(
+fn derive_body(
     ikm: &[u8],
     identity: u8,
     constraint: u8,

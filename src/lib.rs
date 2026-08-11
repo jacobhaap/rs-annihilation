@@ -96,8 +96,7 @@
 mod annihilative;
 mod constants;
 mod errors;
-mod solution;
+mod pow;
 
 pub use crate::annihilative::AnnihlKey;
 pub use crate::errors::AnnihlErr;
-pub use crate::solution::Solution;
