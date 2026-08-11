@@ -50,10 +50,12 @@ pub(crate) trait Identity {
 /// Each solution's body is authenticated by its keying material.
 pub fn pow_mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
     let mut nonce = 0u128;
+    let mut k_candidate = [0u8; 32];
+    let mut a_candidate = [0u8; 32];
 
     loop {
-        let mut k_candidate = derive_key(ikm, nonce, n);
-        let mut a_candidate = derive_key(iam, nonce, n);
+        derive_key(&mut k_candidate, ikm, nonce, n);
+        derive_key(&mut a_candidate, iam, nonce, n);
 
         // 0x7F or below identifies key, 0x80 or above identifies antikey
         let k_id_ok = Choice::from((k_candidate[0] <= 0x7F) as u8);
@@ -77,9 +79,6 @@ pub fn pow_mine(ikm: &[u8], iam: &[u8], n: u8) -> ([u8; 32], [u8; 32]) {
         if bool::from(satisfied) {
             return (k_candidate, a_candidate);
         }
-
-        k_candidate.zeroize();
-        a_candidate.zeroize();
 
         nonce += 1;
     }
@@ -176,7 +175,7 @@ pub fn authenticate(ikm: &[u8], key: [u8; 32]) -> Result<(), AnnihlErr> {
     }
 }
 
-fn derive_key(ikm: &[u8], nonce: u128, n: u8) -> [u8; 32] {
+fn derive_key(dst: &mut [u8; 32], ikm: &[u8], nonce: u128, n: u8) {
     let mut hasher = Sha256::new();
     hasher.update(ikm);
     hasher.update(nonce.to_le_bytes());
@@ -186,20 +185,19 @@ fn derive_key(ikm: &[u8], nonce: u128, n: u8) -> [u8; 32] {
     let identity = okm[0];
     let mut body = authenticate_ikm(ikm, identity, n);
 
-    okm[9..31].copy_from_slice(&body);
+    dst[1..32].copy_from_slice(&body);
     body.zeroize();
-    okm
 }
 
-fn authenticate_ikm(ikm: &[u8], identity: u8, n: u8) -> [u8; 22] {
+fn authenticate_ikm(ikm: &[u8], identity: u8, n: u8) -> [u8; 30] {
     let mut mac = Hmac::<Sha256>::new_from_slice(ikm)
         .expect("HMAC can take key of any size");
     mac.update(&[identity]);
     mac.update(&[n]);
     let mut digest: [u8; 32] = mac.finalize().into_bytes().into();
 
-    let mut body = [0u8; 22];
-    body.copy_from_slice(&digest[..22]);
+    let mut body = [0u8; 30];
+    body.copy_from_slice(&digest[..30]);
     digest.zeroize();
     body
 }
